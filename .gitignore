@@ -1,0 +1,35 @@
+# Dependencies
+node_modules
+
+# Build outputs
+dist
+.turbo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+*.tsbuildinfo
+*.pem
+
+# Agent workspace (created at runtime)
+milo-workspace/

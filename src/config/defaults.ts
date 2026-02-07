@@ -1,0 +1,58 @@
+import { homedir } from 'os';
+import { join } from 'path';
+import type { AgentConfig } from './schema';
+
+/**
+ * Default configuration values
+ */
+export const DEFAULT_WORKSPACE_DIR = join(homedir(), 'milo-workspace');
+
+export const defaultConfig: AgentConfig = {
+  agentName: 'Milo',
+  agentId: '',
+  aliases: {
+    CC: 'Claude Code',
+    claude: 'Claude Code',
+  },
+  workspace: {
+    baseDir: DEFAULT_WORKSPACE_DIR,
+    projectsDir: 'projects',
+    sessionsDir: 'SESSION',
+    templatesDir: 'templates',
+    toolsDir: 'tools',
+  },
+  claudeCode: {
+    maxConcurrentSessions: 3,
+    startupMaxRetries: 5,
+    startupRetryIntervalSeconds: 30,
+  },
+  scheduler: {
+    heartbeatIntervalMinutes: 3,
+    userNotificationThrottleMinutes: 20,
+  },
+  tasks: {
+    maxRetries: 3,
+  },
+  tools: {
+    safeTools: ['create-project', 'init-git-repo', 'list-files'],
+    requireConfirmation: ['delete-project', 'force-push'],
+  },
+  messaging: {
+    activeAdapter: 'webapp',
+    webapp: {
+      apiUrl: 'https://www.milobot.dev/api',
+      pollIntervalMs: 60000,
+    },
+    telegram: {
+      enabled: false,
+    },
+  },
+  onboardingComplete: false,
+};
+
+/**
+ * Get the default config path
+ */
+export function getDefaultConfigPath(): string {
+  return join(DEFAULT_WORKSPACE_DIR, 'config.json');
+}
