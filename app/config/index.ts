@@ -3,6 +3,8 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { agentConfigSchema, type AgentConfig } from './schema';
 import { defaultConfig, getDefaultConfigPath } from './defaults';
+import { loadApiKey, loadAnthropicKey } from '../utils/keychain';
+import { setAIModel } from '../utils/ai-client';
 
 export type { AgentConfig } from './schema';
 export { defaultConfig, getDefaultConfigPath } from './defaults';
@@ -10,7 +12,7 @@ export { defaultConfig, getDefaultConfigPath } from './defaults';
 /**
  * Load configuration from file
  */
-export function loadConfig(configPath?: string): AgentConfig {
+export async function loadConfig(configPath?: string): Promise<AgentConfig> {
   const path = configPath || getDefaultConfigPath();
 
   // If config file doesn't exist, return defaults
@@ -53,6 +55,10 @@ export function loadConfig(configPath?: string): AgentConfig {
         ...defaultConfig.tools,
         ...rawConfig.tools,
       },
+      ai: {
+        ...defaultConfig.ai,
+        ...rawConfig.ai,
+      },
       messaging: {
         ...defaultConfig.messaging,
         ...rawConfig.messaging,
@@ -69,6 +75,33 @@ export function loadConfig(configPath?: string): AgentConfig {
 
     // Load .env file if exists
     loadEnvFile(config.workspace.baseDir);
+
+    // If MILO_API_KEY still not set, try the OS keychain
+    if (!process.env.MILO_API_KEY) {
+      try {
+        const keychainKey = await loadApiKey();
+        if (keychainKey) {
+          process.env.MILO_API_KEY = keychainKey;
+        }
+      } catch {
+        // Keychain unavailable, continue without it
+      }
+    }
+
+    // If ANTHROPIC_API_KEY still not set, try the OS keychain
+    if (!process.env.ANTHROPIC_API_KEY) {
+      try {
+        const keychainKey = await loadAnthropicKey();
+        if (keychainKey) {
+          process.env.ANTHROPIC_API_KEY = keychainKey;
+        }
+      } catch {
+        // Keychain unavailable, continue without it
+      }
+    }
+
+    // Configure the AI model from config
+    setAIModel(config.ai.model);
 
     return config;
   } catch (error) {
@@ -124,11 +157,8 @@ export function watchConfig(
   callback: (config: AgentConfig) => void
 ): void {
   watchFile(configPath, { interval: 5000 }, () => {
-    try {
-      const config = loadConfig(configPath);
-      callback(config);
-    } catch (error) {
-      console.error('Failed to reload config:', error);
-    }
+    loadConfig(configPath)
+      .then((config) => callback(config))
+      .catch((error) => console.error('Failed to reload config:', error));
   });
 }

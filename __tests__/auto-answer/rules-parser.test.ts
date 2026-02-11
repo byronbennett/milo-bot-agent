@@ -1,4 +1,4 @@
-import { mergeRules, type AutoAnswerRule, type ParsedRules } from '../../src/auto-answer/rules-parser';
+import { mergeRules, type AutoAnswerRule, type ParsedRules } from '../../app/auto-answer/rules-parser';
 
 // Mock rules for testing
 function createMockRules(source: 'global' | 'session', rules: Partial<AutoAnswerRule>[]): ParsedRules {

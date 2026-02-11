@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/bin/milo.ts'],
+  entry: ['app/index.ts', 'app/bin/milo.ts'],
   format: ['esm'],
   dts: true,
   clean: true,
@@ -10,7 +10,4 @@ export default defineConfig({
   target: 'node20',
   outDir: 'dist',
   shims: true,
-  banner: {
-    js: '#!/usr/bin/env node',
-  },
 });

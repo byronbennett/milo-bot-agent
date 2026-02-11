@@ -5,7 +5,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "./app",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -18,6 +18,6 @@
     "noEmit": false,
     "incremental": false
   },
-  "include": ["src/**/*"],
+  "include": ["app/**/*"],
   "exclude": ["node_modules", "dist"]
 }

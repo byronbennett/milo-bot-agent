@@ -1,5 +1,5 @@
-import { parseIntent } from '../../src/intent';
-import type { PendingMessage, AgentConfig } from '../../src/shared';
+import { parseIntent } from '../../app/intent';
+import type { PendingMessage, AgentConfig } from '../../app/shared';
 
 // Mock config for tests
 const mockConfig: AgentConfig = {

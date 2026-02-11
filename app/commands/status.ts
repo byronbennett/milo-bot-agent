@@ -3,8 +3,32 @@ import { existsSync, readFileSync } from 'fs';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
 import { Logger } from '../utils/logger';
+import { loadApiKey, loadAnthropicKey } from '../utils/keychain';
 
 const logger = new Logger({ prefix: '[status]' });
+
+async function resolveKeyStatus(
+  loadFromKeychain: () => Promise<string | null>,
+  envName: string,
+  envPath: string,
+): Promise<string> {
+  // Check keychain first
+  try {
+    const keychainKey = await loadFromKeychain();
+    if (keychainKey) return 'Configured (system keychain)';
+  } catch {
+    // Keychain unavailable
+  }
+
+  // Check .env
+  if (existsSync(envPath)) {
+    const content = readFileSync(envPath, 'utf-8');
+    const re = new RegExp(`^${envName}=.+`, 'm');
+    if (re.test(content)) return 'Configured (.env file)';
+  }
+
+  return 'Not configured';
+}
 
 export const statusCommand = new Command('status')
   .description('Show agent status')
@@ -30,21 +54,20 @@ export const statusCommand = new Command('status')
     // Load config
     try {
       const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+      const envPath = join(resolvedDir, '.env');
 
       console.log(`Agent Name: ${config.agentName}`);
       console.log(`Workspace: ${resolvedDir}`);
       console.log(`Onboarding: ${config.onboardingComplete ? 'Complete' : 'Incomplete'}`);
       console.log('');
 
-      // Check for API key
-      const envPath = join(resolvedDir, '.env');
-      let hasApiKey = false;
-      if (existsSync(envPath)) {
-        const envContent = readFileSync(envPath, 'utf-8');
-        hasApiKey = envContent.includes('MILO_API_KEY=milo_');
-      }
+      // Check keys
+      const miloKeyStatus = await resolveKeyStatus(loadApiKey, 'MILO_API_KEY', envPath);
+      const anthropicKeyStatus = await resolveKeyStatus(loadAnthropicKey, 'ANTHROPIC_API_KEY', envPath);
 
-      console.log(`API Key: ${hasApiKey ? 'Configured' : 'Not configured'}`);
+      console.log(`MiloBot API Key: ${miloKeyStatus}`);
+      console.log(`Anthropic API Key: ${anthropicKeyStatus}`);
+      console.log(`AI Model: ${config.ai?.model ?? 'claude-sonnet-4-5 (default)'}`);
       console.log('');
 
       // Check messaging config
@@ -58,11 +81,15 @@ export const statusCommand = new Command('status')
       console.log('Daemon: Not running (or status check not implemented)');
       console.log('');
 
-      if (!hasApiKey) {
+      if (miloKeyStatus === 'Not configured' || anthropicKeyStatus === 'Not configured') {
         console.log('Next steps:');
-        console.log('1. Get an API key from https://www.milobot.dev/settings');
-        console.log(`2. Add it to ${join(resolvedDir, '.env')}`);
-        console.log('3. Run `milo start` to start the agent');
+        if (miloKeyStatus === 'Not configured') {
+          console.log('  - Get a MiloBot API key from https://www.milobot.dev/settings');
+        }
+        if (anthropicKeyStatus === 'Not configured') {
+          console.log('  - Get an Anthropic API key from https://console.anthropic.com/');
+        }
+        console.log('  - Run `milo init` to configure missing keys');
       } else if (!config.onboardingComplete) {
         console.log('Next steps:');
         console.log('Run `milo start` to start the agent');

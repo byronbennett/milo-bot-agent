@@ -34,7 +34,7 @@ export const toolsConfigSchema = z.object({
 
 export const webappMessagingConfigSchema = z.object({
   apiUrl: z.string().url().default('https://www.milobot.dev/api'),
-  pollIntervalMs: z.number().min(1000).default(60000),
+  pollIntervalMs: z.number().min(1000).default(180000),
 });
 
 export const telegramMessagingConfigSchema = z.object({
@@ -43,10 +43,18 @@ export const telegramMessagingConfigSchema = z.object({
   chatId: z.string().optional(),
 });
 
+export const aiConfigSchema = z.object({
+  model: z.string().default('claude-sonnet-4-5'),
+});
+
 export const messagingConfigSchema = z.object({
   activeAdapter: z.enum(['webapp', 'telegram']).default('webapp'),
   webapp: webappMessagingConfigSchema.default({}),
   telegram: telegramMessagingConfigSchema.default({}),
+});
+
+export const pubnubConfigSchema = z.object({
+  enabled: z.boolean().default(true),
 });
 
 export const agentConfigSchema = z.object({
@@ -61,7 +69,9 @@ export const agentConfigSchema = z.object({
   scheduler: schedulerConfigSchema.default({}),
   tasks: tasksConfigSchema.default({}),
   tools: toolsConfigSchema.default({}),
+  ai: aiConfigSchema.default({}),
   messaging: messagingConfigSchema.default({}),
+  pubnub: pubnubConfigSchema.default({}),
   onboardingComplete: z.boolean().default(false),
 });
 
@@ -71,4 +81,5 @@ export type ClaudeCodeConfig = z.infer<typeof claudeCodeConfigSchema>;
 export type SchedulerConfig = z.infer<typeof schedulerConfigSchema>;
 export type TasksConfig = z.infer<typeof tasksConfigSchema>;
 export type ToolsConfig = z.infer<typeof toolsConfigSchema>;
+export type AIConfig = z.infer<typeof aiConfigSchema>;
 export type MessagingConfig = z.infer<typeof messagingConfigSchema>;

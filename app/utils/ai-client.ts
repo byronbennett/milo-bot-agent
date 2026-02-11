@@ -8,6 +8,22 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 let client: Anthropic | null = null;
+let configuredModel = 'claude-sonnet-4-5';
+
+/**
+ * Set the model used for Milo AI calls (intent parsing, prompt enhancement, auto-answer).
+ * This does NOT affect Claude Code sessions.
+ */
+export function setAIModel(model: string): void {
+  configuredModel = model;
+}
+
+/**
+ * Get the currently configured AI model name.
+ */
+export function getAIModel(): string {
+  return configuredModel;
+}
 
 /**
  * Get or create the Anthropic client singleton
@@ -57,7 +73,7 @@ export async function complete(
   const ai = getAIClient();
 
   const response = await ai.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: configuredModel,
     max_tokens: options.maxTokens ?? 1024,
     temperature: options.temperature ?? 0.3,
     stop_sequences: options.stopSequences,

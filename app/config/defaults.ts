@@ -37,15 +37,21 @@ export const defaultConfig: AgentConfig = {
     safeTools: ['create-project', 'init-git-repo', 'list-files'],
     requireConfirmation: ['delete-project', 'force-push'],
   },
+  ai: {
+    model: 'claude-sonnet-4-5',
+  },
   messaging: {
     activeAdapter: 'webapp',
     webapp: {
       apiUrl: 'https://www.milobot.dev/api',
-      pollIntervalMs: 60000,
+      pollIntervalMs: 180000,
     },
     telegram: {
       enabled: false,
     },
+  },
+  pubnub: {
+    enabled: true,
   },
   onboardingComplete: false,
 };

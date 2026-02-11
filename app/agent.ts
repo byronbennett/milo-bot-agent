@@ -14,8 +14,8 @@
  */
 
 import type { PendingMessage } from './shared';
-import { loadConfig, type AgentConfig } from './config';
-import { WebAppAdapter, type MessagingAdapter } from './messaging';
+import type { AgentConfig } from './config';
+import { WebAppAdapter, PubNubAdapter, type MessagingAdapter } from './messaging';
 import { SessionManager } from './session/manager';
 import { HeartbeatScheduler } from './scheduler/heartbeat';
 import { Logger } from './utils/logger';
@@ -28,7 +28,7 @@ import { openSession, sendPrompt, closeSession, getActiveSessionCount } from './
 import { join } from 'path';
 
 export interface AgentOptions {
-  configPath?: string;
+  config: AgentConfig;
   apiKey?: string;
   debug?: boolean;
 }
@@ -37,14 +37,16 @@ export class MiloAgent {
   private config: AgentConfig;
   private logger: Logger;
   private messagingAdapter: MessagingAdapter;
+  private restAdapter: WebAppAdapter;
+  private pubnubAdapter: PubNubAdapter | null;
   private sessionManager: SessionManager;
   private scheduler: HeartbeatScheduler;
   private isRunning: boolean = false;
   private shuttingDown: boolean = false;
 
-  constructor(options: AgentOptions = {}) {
-    // Load configuration
-    this.config = loadConfig(options.configPath);
+  constructor(options: AgentOptions) {
+    // Use pre-loaded configuration
+    this.config = options.config;
 
     // Override API key if provided
     if (options.apiKey) {
@@ -57,11 +59,26 @@ export class MiloAgent {
       prefix: `[${this.config.agentName}]`,
     });
 
-    // Initialize components
-    this.messagingAdapter = new WebAppAdapter({
+    // Always create a REST adapter for fallback and DB operations
+    this.restAdapter = new WebAppAdapter({
       apiUrl: this.config.messaging.webapp.apiUrl,
       apiKey: process.env.MILO_API_KEY || '',
     });
+
+    // Create PubNub adapter if enabled
+    if (this.config.pubnub.enabled) {
+      this.pubnubAdapter = new PubNubAdapter({
+        apiUrl: this.config.messaging.webapp.apiUrl,
+        apiKey: process.env.MILO_API_KEY || '',
+        onMessage: this.handleRealtimeMessage.bind(this),
+        logger: this.logger,
+      });
+      // PubNubAdapter implements MessagingAdapter, so it can be used as the primary adapter
+      this.messagingAdapter = this.pubnubAdapter;
+    } else {
+      this.pubnubAdapter = null;
+      this.messagingAdapter = this.restAdapter;
+    }
 
     this.sessionManager = new SessionManager({
       baseDir: this.config.workspace.baseDir,
@@ -112,9 +129,31 @@ export class MiloAgent {
       this.logger.info(`Discovered ${toolCount} user tools`);
 
       // Verify API key and connection
-      const heartbeatResult = await this.messagingAdapter.sendHeartbeat();
-      this.logger.info(`Connected as agent: ${heartbeatResult.agentId}`);
-      this.logger.info(`Poll interval: ${heartbeatResult.pollIntervalMs}ms`);
+      try {
+        const heartbeatResult = await this.restAdapter.sendHeartbeat();
+        this.logger.info(`Connected as agent: ${heartbeatResult.agentId}`);
+      } catch (heartbeatError) {
+        this.logger.warn('Could not reach server, will retry:', heartbeatError);
+      }
+
+      // Connect PubNub if enabled
+      if (this.pubnubAdapter) {
+        try {
+          await this.pubnubAdapter.connect();
+          this.logger.info('PubNub connected - real-time messaging enabled');
+
+          // With PubNub, reduce heartbeat to every 5 minutes (DB state only)
+          this.scheduler.setInterval(5);
+        } catch (error) {
+          this.logger.warn('PubNub connection failed, falling back to polling:', error);
+          // Fall back to REST adapter
+          this.messagingAdapter = this.restAdapter;
+          this.pubnubAdapter = null;
+        }
+      }
+
+      // Catch up on missed messages (always needed on startup)
+      await this.catchUpMessages();
 
       // Start scheduler
       this.scheduler.start();
@@ -138,6 +177,12 @@ export class MiloAgent {
 
     this.logger.info('Stopping MiloBot agent...');
 
+    // Disconnect PubNub gracefully (triggers leave Presence event)
+    if (this.pubnubAdapter) {
+      await this.pubnubAdapter.disconnect();
+      this.logger.info('PubNub disconnected');
+    }
+
     // Stop scheduler
     this.scheduler.stop();
 
@@ -150,27 +195,28 @@ export class MiloAgent {
    */
   private async handleHeartbeat(): Promise<void> {
     try {
-      // 1. Send heartbeat
-      await this.messagingAdapter.sendHeartbeat();
+      // 1. Always send HTTP heartbeat for DB state
+      await this.restAdapter.sendHeartbeat();
 
-      // 2. Check for pending messages
-      const pendingMessages = await this.messagingAdapter.getPendingMessages();
+      // 2. Only poll for pending messages if PubNub is NOT connected
+      //    When PubNub is active, messages arrive in real-time via onMessage callback
+      if (!this.pubnubAdapter?.isConnected) {
+        const pendingMessages = await this.restAdapter.getPendingMessages();
 
-      if (pendingMessages.length > 0) {
-        this.logger.debug(`Received ${pendingMessages.length} pending messages`);
+        if (pendingMessages.length > 0) {
+          this.logger.debug(`Received ${pendingMessages.length} pending messages`);
 
-        // Process messages
-        for (const message of pendingMessages) {
-          await this.processMessage(message);
+          for (const message of pendingMessages) {
+            await this.processMessage(message);
+          }
+
+          await this.restAdapter.acknowledgeMessages(
+            pendingMessages.map((m) => m.id)
+          );
         }
-
-        // Acknowledge messages
-        await this.messagingAdapter.acknowledgeMessages(
-          pendingMessages.map((m) => m.id)
-        );
       }
 
-      // 3. Check active sessions
+      // 3. Check active sessions (unchanged)
       const activeSessions = await this.sessionManager.listActiveSessions();
 
       for (const session of activeSessions) {
@@ -178,6 +224,44 @@ export class MiloAgent {
       }
     } catch (error) {
       this.logger.error('Heartbeat failed:', error);
+    }
+  }
+
+  /**
+   * Handle a message received in real-time via PubNub
+   * Called by the PubNubAdapter's onMessage callback
+   */
+  private async handleRealtimeMessage(message: PendingMessage): Promise<void> {
+    this.logger.info(`Real-time message received: ${message.id}`);
+
+    try {
+      // Process the message (same logic as processMessage)
+      await this.processMessage(message);
+
+      // Acknowledge via REST so the DB tracks it
+      await this.restAdapter.acknowledgeMessages([message.id]);
+    } catch (error) {
+      this.logger.error('Failed to process real-time message:', error);
+    }
+  }
+
+  /**
+   * Catch up on messages missed while agent was offline
+   * Called on startup, uses REST API
+   */
+  private async catchUpMessages(): Promise<void> {
+    try {
+      const pending = await this.restAdapter.getPendingMessages();
+      if (pending.length > 0) {
+        this.logger.info(`Catching up on ${pending.length} missed messages`);
+        for (const message of pending) {
+          await this.processMessage(message);
+        }
+        await this.restAdapter.acknowledgeMessages(pending.map((m) => m.id));
+        this.logger.info('Catch-up complete');
+      }
+    } catch (error) {
+      this.logger.warn('Message catch-up failed:', error);
     }
   }
 
