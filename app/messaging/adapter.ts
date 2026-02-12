@@ -23,5 +23,5 @@ export interface MessagingAdapter {
   /**
    * Send heartbeat to keep agent online
    */
-  sendHeartbeat(): Promise<HeartbeatResponse>;
+  sendHeartbeat(activeSessions?: string[]): Promise<HeartbeatResponse>;
 }

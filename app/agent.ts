@@ -214,9 +214,11 @@ export class MiloAgent {
   private async handleHeartbeat(): Promise<void> {
     this.logger.verbose('Heartbeat cycle starting...');
     try {
-      // 1. Always send HTTP heartbeat for DB state
+      // 1. Always send HTTP heartbeat for DB state (include active session names)
       this.logger.verbose('Sending HTTP heartbeat to server...');
-      await this.restAdapter.sendHeartbeat();
+      const activeSessions = await this.sessionManager.listActiveSessions();
+      const activeSessionNames = activeSessions.map((s) => s.name);
+      await this.restAdapter.sendHeartbeat(activeSessionNames);
       this.logger.verbose('Heartbeat acknowledged by server');
 
       // 2. Only poll for pending messages if PubNub is NOT connected
@@ -243,8 +245,7 @@ export class MiloAgent {
         this.logger.verbose('Skipping message poll (PubNub is connected)');
       }
 
-      // 3. Check active sessions
-      const activeSessions = await this.sessionManager.listActiveSessions();
+      // 3. Check active sessions (reuse list from heartbeat above)
       this.logger.verbose(`Checking ${activeSessions.length} active session(s)`);
 
       for (const session of activeSessions) {

@@ -304,8 +304,8 @@ export class PubNubAdapter implements MessagingAdapter {
    * Send heartbeat to keep agent online in DB
    * Still uses REST API - supplements PubNub Presence
    */
-  async sendHeartbeat(): Promise<HeartbeatResponse> {
-    return this.request<HeartbeatResponse>('POST', '/agent/heartbeat');
+  async sendHeartbeat(activeSessions: string[] = []): Promise<HeartbeatResponse> {
+    return this.request<HeartbeatResponse>('POST', '/agent/heartbeat', { activeSessions });
   }
 
   /**

@@ -80,7 +80,7 @@ export class WebAppAdapter implements MessagingAdapter {
   /**
    * Send heartbeat to keep agent online
    */
-  async sendHeartbeat(): Promise<HeartbeatResponse> {
-    return this.request<HeartbeatResponse>('POST', '/agent/heartbeat');
+  async sendHeartbeat(activeSessions: string[] = []): Promise<HeartbeatResponse> {
+    return this.request<HeartbeatResponse>('POST', '/agent/heartbeat', { activeSessions });
   }
 }

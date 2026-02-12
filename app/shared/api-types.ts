@@ -25,6 +25,10 @@ export interface PaginatedResponse<T> extends ApiResponse<T[]> {
 // Heartbeat API
 // ============================================================================
 
+export interface HeartbeatRequest {
+  activeSessions: string[];
+}
+
 export interface HeartbeatResponse {
   ok: boolean;
   pollIntervalMs: number;
