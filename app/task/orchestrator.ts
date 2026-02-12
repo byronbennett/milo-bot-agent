@@ -38,6 +38,7 @@ export async function runTasks(
   let skippedCount = 0;
 
   logger.info(`Starting task orchestration: ${tasks.length} tasks`);
+  logger.verbose(`  Tasks: ${tasks.map(t => t.type).join(' → ')}`);
 
   // Build dependency graph
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
@@ -48,6 +49,9 @@ export async function runTasks(
     const task = tasks[i];
 
     // Check if dependencies are met
+    if (task.dependsOn && task.dependsOn.length > 0) {
+      logger.verbose(`  Task ${i + 1}/${tasks.length}: ${task.type} — checking dependencies: ${task.dependsOn.join(', ')}`);
+    }
     const depsOk = await checkDependencies(task, completed, taskMap, results);
 
     if (!depsOk) {
@@ -69,6 +73,7 @@ export async function runTasks(
     }
 
     // Execute the task
+    logger.verbose(`  Task ${i + 1}/${tasks.length}: ${task.type} — starting`);
     task.status = 'running';
     task.startedAt = new Date();
 
@@ -81,12 +86,14 @@ export async function runTasks(
     task.result = result;
     results.set(task.id, result);
 
+    const durationMs = task.completedAt.getTime() - task.startedAt.getTime();
+
     if (result.success) {
       task.status = 'completed';
       completed.add(task.id);
       completedCount++;
 
-      logger.info(`Task [${task.id}] completed successfully`);
+      logger.verbose(`  Task ${i + 1}/${tasks.length}: ${task.type} — completed (${durationMs}ms)`);
     } else {
       task.status = 'failed';
       task.error = result.error;
@@ -95,6 +102,7 @@ export async function runTasks(
       errors.push({ taskId: task.id, error: result.error ?? 'Unknown error' });
 
       logger.error(`Task [${task.id}] failed: ${result.error}`);
+      logger.verbose(`  Task ${i + 1}/${tasks.length}: ${task.type} — failed after ${durationMs}ms`);
 
       if (onError) {
         onError(task, new Error(result.error));
@@ -102,6 +110,10 @@ export async function runTasks(
 
       if (stopOnFailure) {
         logger.warn('Stopping orchestration due to failure');
+        const remaining = tasks.length - i - 1;
+        if (remaining > 0) {
+          logger.verbose(`  Skipping ${remaining} remaining task(s)`);
+        }
 
         // Mark remaining tasks as skipped
         for (let j = i + 1; j < tasks.length; j++) {

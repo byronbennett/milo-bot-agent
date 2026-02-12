@@ -9,6 +9,7 @@ export const startCommand = new Command('start')
   .description('Start the MiloBot agent daemon')
   .option('-c, --config <path>', 'Path to config file')
   .option('-d, --debug', 'Enable debug logging')
+  .option('-v, --verbose', 'Enable verbose step-by-step logging')
   .option('--foreground', 'Run in foreground (don\'t daemonize)')
   .option('--no-pubnub', 'Disable PubNub real-time messaging (use polling)')
   .action(async (options) => {
@@ -34,6 +35,7 @@ export const startCommand = new Command('start')
       const agent = new MiloAgent({
         config,
         debug: options.debug,
+        verbose: options.verbose,
       });
 
       await agent.start();

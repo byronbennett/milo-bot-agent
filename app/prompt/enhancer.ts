@@ -64,15 +64,18 @@ export async function enhancePrompt(
 
   // Try template-based enhancement first (fast, no API call)
   if (!options.forceAI) {
+    logger.verbose('  Trying template-based enhancement...');
     const templateResult = tryTemplateEnhancement(trimmedTask);
     if (templateResult) {
-      logger.debug(`Enhanced with template: ${templateResult.templateType}`);
+      logger.verbose(`  Template matched: ${templateResult.templateType}`);
       return templateResult;
     }
+    logger.verbose('  No template matched');
   }
 
   // If templates-only mode, return minimal enhancement
   if (options.templatesOnly) {
+    logger.verbose('  Templates-only mode, using minimal enhancement');
     return {
       prompt: minimalEnhancement(trimmedTask),
       usedAI: false,
@@ -83,17 +86,19 @@ export async function enhancePrompt(
   // Try AI enhancement
   if (isAIAvailable()) {
     try {
+      logger.verbose('  Enhancing with AI...');
       const aiResult = await aiEnhancement(trimmedTask, options);
-      logger.debug('Enhanced with AI');
+      logger.verbose(`  AI enhancement complete (${aiResult.prompt.length} chars)`);
       return aiResult;
     } catch (error) {
       logger.warn('AI enhancement failed, falling back to minimal:', error);
     }
   } else {
-    logger.debug('AI not available, using minimal enhancement');
+    logger.verbose('  AI not available, using minimal enhancement');
   }
 
   // Final fallback: minimal enhancement
+  logger.verbose('  Using minimal enhancement (capitalize + period)');
   return {
     prompt: minimalEnhancement(trimmedTask),
     usedAI: false,

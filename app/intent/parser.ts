@@ -30,6 +30,7 @@ export function parseIntent(
 
   // Case 1: Message has sessionId - it's a send_message to existing session
   if (message.sessionId) {
+    logger.verbose('  Intent: message has sessionId, treating as send_message');
     return {
       type: 'send_message',
       sessionName: message.sessionName ?? undefined,
@@ -40,6 +41,7 @@ export function parseIntent(
   }
 
   // Case 2: Try pattern matching for open_session
+  logger.verbose('  Trying pattern matching...');
   const patternResult = matchOpenSessionPatterns(content);
 
   if (patternResult.matched && patternResult.task) {
@@ -48,6 +50,9 @@ export function parseIntent(
       config.aliases
     );
     const sessionName = generateSessionName(patternResult.task);
+
+    logger.verbose(`  Pattern matched: open_session (confidence: ${patternResult.confidence})`);
+    logger.verbose(`  Project: ${projectName ?? 'none'}, Session: ${sessionName}`);
 
     return {
       type: 'open_session',
@@ -62,6 +67,7 @@ export function parseIntent(
   // Case 3: Check if it looks like a task (weak match)
   if (looksLikeTask(content)) {
     const sessionName = generateSessionName(content);
+    logger.verbose(`  Weak task match (confidence: 0.3), session: ${sessionName}`);
 
     return {
       type: 'open_session',
@@ -73,6 +79,7 @@ export function parseIntent(
   }
 
   // Case 4: Unknown intent
+  logger.verbose('  No pattern matched, intent: unknown');
   return {
     type: 'unknown',
     confidence: 0,
@@ -162,20 +169,25 @@ export async function parseIntentWithAI(
 
   // If confident enough or AI disabled, return pattern result
   if (patternIntent.confidence >= confidenceThreshold || skipAI) {
+    logger.verbose(`  Pattern result accepted (confidence: ${patternIntent.confidence} >= threshold: ${confidenceThreshold})`);
     return patternIntent;
   }
 
   // If pattern failed and AI is available, try AI
   if (patternIntent.type === 'unknown' && isAIAvailable()) {
     try {
-      logger.debug('Pattern matching failed, trying AI fallback');
+      logger.verbose('  Pattern matching insufficient, falling back to AI...');
       const aiIntent = await parseWithAI(message.content, config);
       if (aiIntent.type !== 'unknown') {
+        logger.verbose(`  AI parsed intent: ${aiIntent.type} (confidence: ${aiIntent.confidence})`);
         return aiIntent;
       }
+      logger.verbose('  AI also returned unknown intent');
     } catch (error) {
       logger.warn('AI intent parsing failed:', error);
     }
+  } else if (patternIntent.type === 'unknown') {
+    logger.verbose('  AI not available for fallback parsing');
   }
 
   // Return pattern result as fallback
@@ -199,7 +211,9 @@ async function parseWithAI(
   );
 
   try {
-    const parsed = JSON.parse(response.trim());
+    // Strip markdown code fences if present (e.g. ```json ... ```)
+    const cleaned = response.trim().replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
 
     if (parsed.type === 'open_session' && parsed.task) {
       const projectName = resolveProjectAlias(parsed.project, config.aliases);

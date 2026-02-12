@@ -31,6 +31,7 @@ export interface AgentOptions {
   config: AgentConfig;
   apiKey?: string;
   debug?: boolean;
+  verbose?: boolean;
 }
 
 export class MiloAgent {
@@ -54,8 +55,10 @@ export class MiloAgent {
     }
 
     // Initialize logger
+    // debug > verbose > info (debug shows everything, verbose shows steps + info)
+    const logLevel = options.debug ? 'debug' : options.verbose ? 'verbose' : 'info';
     this.logger = new Logger({
-      level: options.debug ? 'debug' : 'info',
+      level: logLevel,
       prefix: `[${this.config.agentName}]`,
     });
 
@@ -124,38 +127,49 @@ export class MiloAgent {
 
     try {
       // Discover user tools
+      this.logger.verbose('Discovering user tools...');
       const toolsDir = join(this.config.workspace.baseDir, this.config.workspace.toolsDir);
       const toolCount = await discoverTools(toolsDir, 'user');
       this.logger.info(`Discovered ${toolCount} user tools`);
+      this.logger.verbose(`Tools directory: ${toolsDir}`);
 
       // Verify API key and connection
+      this.logger.verbose('Verifying API key with server heartbeat...');
       try {
         const heartbeatResult = await this.restAdapter.sendHeartbeat();
         this.logger.info(`Connected as agent: ${heartbeatResult.agentId}`);
+        this.logger.verbose(`Server URL: ${this.config.messaging.webapp.apiUrl}`);
       } catch (heartbeatError) {
         this.logger.warn('Could not reach server, will retry:', heartbeatError);
       }
 
       // Connect PubNub if enabled
       if (this.pubnubAdapter) {
+        this.logger.verbose('Connecting PubNub for real-time messaging...');
         try {
           await this.pubnubAdapter.connect();
           this.logger.info('PubNub connected - real-time messaging enabled');
 
           // With PubNub, reduce heartbeat to every 5 minutes (DB state only)
           this.scheduler.setInterval(5);
+          this.logger.verbose('Heartbeat interval reduced to 5 min (PubNub handles messages)');
         } catch (error) {
           this.logger.warn('PubNub connection failed, falling back to polling:', error);
           // Fall back to REST adapter
           this.messagingAdapter = this.restAdapter;
           this.pubnubAdapter = null;
         }
+      } else {
+        this.logger.verbose('PubNub disabled, using REST polling');
+        this.logger.verbose(`Poll interval: ${this.config.scheduler.heartbeatIntervalMinutes} min`);
       }
 
       // Catch up on missed messages (always needed on startup)
+      this.logger.verbose('Catching up on missed messages...');
       await this.catchUpMessages();
 
       // Start scheduler
+      this.logger.verbose('Starting heartbeat scheduler...');
       this.scheduler.start();
 
       this.isRunning = true;
@@ -194,17 +208,21 @@ export class MiloAgent {
    * Handle heartbeat cycle
    */
   private async handleHeartbeat(): Promise<void> {
+    this.logger.verbose('Heartbeat cycle starting...');
     try {
       // 1. Always send HTTP heartbeat for DB state
+      this.logger.verbose('Sending HTTP heartbeat to server...');
       await this.restAdapter.sendHeartbeat();
+      this.logger.verbose('Heartbeat acknowledged by server');
 
       // 2. Only poll for pending messages if PubNub is NOT connected
       //    When PubNub is active, messages arrive in real-time via onMessage callback
       if (!this.pubnubAdapter?.isConnected) {
+        this.logger.verbose('Polling for pending messages (PubNub not connected)...');
         const pendingMessages = await this.restAdapter.getPendingMessages();
 
         if (pendingMessages.length > 0) {
-          this.logger.debug(`Received ${pendingMessages.length} pending messages`);
+          this.logger.verbose(`Found ${pendingMessages.length} pending message(s)`);
 
           for (const message of pendingMessages) {
             await this.processMessage(message);
@@ -213,15 +231,22 @@ export class MiloAgent {
           await this.restAdapter.acknowledgeMessages(
             pendingMessages.map((m) => m.id)
           );
+          this.logger.verbose(`Acknowledged ${pendingMessages.length} message(s)`);
+        } else {
+          this.logger.verbose('No pending messages');
         }
+      } else {
+        this.logger.verbose('Skipping message poll (PubNub is connected)');
       }
 
-      // 3. Check active sessions (unchanged)
+      // 3. Check active sessions
       const activeSessions = await this.sessionManager.listActiveSessions();
+      this.logger.verbose(`Checking ${activeSessions.length} active session(s)`);
 
       for (const session of activeSessions) {
         await this.processSession(session);
       }
+      this.logger.verbose('Heartbeat cycle complete');
     } catch (error) {
       this.logger.error('Heartbeat failed:', error);
     }
@@ -233,13 +258,23 @@ export class MiloAgent {
    */
   private async handleRealtimeMessage(message: PendingMessage): Promise<void> {
     this.logger.info(`Real-time message received: ${message.id}`);
+    this.logger.verbose(`Message via PubNub (session: ${message.sessionId ?? 'none'}, content: "${message.content.slice(0, 80)}")`);
 
     try {
-      // Process the message (same logic as processMessage)
+      // Send immediate acknowledgement via PubNub only (no DB persist for transient ack)
+      if (this.pubnubAdapter) {
+        this.pubnubAdapter.pubsubOnly = true;
+        await this.messagingAdapter.sendMessage('Message received. Processing...', message.sessionId);
+        this.pubnubAdapter.pubsubOnly = false;
+        this.logger.verbose('Sent immediate PubNub acknowledgement');
+      }
+
+      // Process the message (dual-write: PubNub + REST)
       await this.processMessage(message);
 
-      // Acknowledge via REST so the DB tracks it
+      this.logger.verbose('Acknowledging real-time message via REST...');
       await this.restAdapter.acknowledgeMessages([message.id]);
+      this.logger.verbose('Real-time message processing complete');
     } catch (error) {
       this.logger.error('Failed to process real-time message:', error);
     }
@@ -251,14 +286,18 @@ export class MiloAgent {
    */
   private async catchUpMessages(): Promise<void> {
     try {
+      this.logger.verbose('Fetching pending messages from server...');
       const pending = await this.restAdapter.getPendingMessages();
       if (pending.length > 0) {
         this.logger.info(`Catching up on ${pending.length} missed messages`);
-        for (const message of pending) {
-          await this.processMessage(message);
+        for (let i = 0; i < pending.length; i++) {
+          this.logger.verbose(`Processing catch-up message ${i + 1}/${pending.length}: "${pending[i].content.slice(0, 80)}"`);
+          await this.processMessage(pending[i]);
         }
         await this.restAdapter.acknowledgeMessages(pending.map((m) => m.id));
         this.logger.info('Catch-up complete');
+      } else {
+        this.logger.verbose('No missed messages to catch up on');
       }
     } catch (error) {
       this.logger.warn('Message catch-up failed:', error);
@@ -269,15 +308,19 @@ export class MiloAgent {
    * Process an incoming message
    */
   private async processMessage(message: PendingMessage): Promise<void> {
+    const startTime = Date.now();
     this.logger.debug(`Processing message: ${message.id}`);
     this.logger.info(`Received: ${message.content}`);
 
     try {
-      // Parse the intent
+      // Step 1: Parse intent
+      this.logger.verbose('Step 1: Parsing intent...');
       const intent = await parseIntentWithAI(message, this.config);
-      this.logger.debug(`Parsed intent: ${describeIntent(intent)}`);
+      this.logger.verbose(`  Intent: ${intent.type} (confidence: ${intent.confidence})`);
+      this.logger.verbose(`  ${describeIntent(intent)}`);
 
-      // Handle based on intent type
+      // Step 2: Route by intent type
+      this.logger.verbose(`Step 2: Routing to handler "${intent.type}"...`);
       switch (intent.type) {
         case 'open_session':
           await this.handleOpenSession(intent, message);
@@ -289,8 +332,8 @@ export class MiloAgent {
 
         case 'unknown':
         default:
+          this.logger.verbose('  Intent unknown, sending clarification to user');
           if (isConfident(intent, 0.3)) {
-            // Low confidence but might be a task
             await this.messagingAdapter.sendMessage(
               `I'm not sure what you want me to do. Could you clarify?\n\nI understood: "${message.content}"`
             );
@@ -304,6 +347,9 @@ export class MiloAgent {
           }
           break;
       }
+
+      const elapsed = Date.now() - startTime;
+      this.logger.verbose(`Message processing complete (${elapsed}ms)`);
     } catch (error) {
       this.logger.error('Failed to process message:', error);
       await this.messagingAdapter.sendMessage(
@@ -323,10 +369,13 @@ export class MiloAgent {
     const taskDescription = intent.taskDescription ?? message.content;
 
     // Check concurrent session limit
+    this.logger.verbose('  Checking session limits...');
     const activeSessions = await this.sessionManager.listActiveSessions();
     const maxSessions = this.config.claudeCode.maxConcurrentSessions;
+    this.logger.verbose(`  Active sessions: ${activeSessions.length}/${maxSessions}`);
 
     if (activeSessions.length >= maxSessions) {
+      this.logger.verbose('  Session limit reached, notifying user');
       await this.messagingAdapter.sendMessage(
         `Cannot start new session. You have ${activeSessions.length}/${maxSessions} active sessions.\n` +
         `Active sessions: ${activeSessions.map((s) => s.name).join(', ')}`
@@ -335,18 +384,22 @@ export class MiloAgent {
     }
 
     // Enhance the prompt
+    this.logger.verbose('  Enhancing prompt...');
     const enhanceResult = await enhancePrompt(taskDescription, {
       context: {
         projectName: intent.projectName,
       },
     });
-
-    this.logger.debug(`Enhanced prompt: ${enhanceResult.prompt.slice(0, 100)}...`);
+    this.logger.verbose(`  Enhancement strategy: ${enhanceResult.usedAI ? 'AI' : enhanceResult.templateType ? `template (${enhanceResult.templateType})` : 'minimal'}`);
+    this.logger.verbose(`  Enhanced prompt: "${enhanceResult.prompt.slice(0, 100)}..." (${enhanceResult.prompt.length} chars)`);
 
     // Create session file
+    this.logger.verbose(`  Creating session file: ${sessionName}`);
     const session = await this.sessionManager.createSession(sessionName, enhanceResult.prompt);
+    this.logger.verbose(`  Session file created`);
 
     // Notify user
+    this.logger.verbose('  Notifying user of session start...');
     await this.messagingAdapter.sendMessage(
       `Starting session: ${sessionName}\n` +
       (intent.projectName ? `Project: ${intent.projectName}\n` : '') +
@@ -358,8 +411,12 @@ export class MiloAgent {
       ? join(this.config.workspace.baseDir, this.config.workspace.projectsDir, intent.projectName)
       : this.config.workspace.baseDir;
 
+    this.logger.verbose(`  Project path: ${projectPath}`);
     const tasks = createStandardTaskList(sessionName, enhanceResult.prompt, projectPath);
+    this.logger.verbose(`  Created ${tasks.length} task(s): ${tasks.map(t => t.type).join(' → ')}`);
+    this.logger.verbose('  Executing tasks...');
 
+    const taskStart = Date.now();
     const result = await runTasks(tasks, {
       sessionId: session.name,
       sessionName: session.name,
@@ -367,16 +424,19 @@ export class MiloAgent {
       workspaceDir: this.config.workspace.baseDir,
       previousResults: new Map(),
     });
+    const taskElapsed = Date.now() - taskStart;
 
     // Update session status based on result
     if (result.success) {
       await this.sessionManager.updateSessionStatus(sessionName, 'COMPLETED');
+      this.logger.verbose(`  Session completed: ${result.completedTasks} tasks in ${(taskElapsed / 1000).toFixed(1)}s`);
       await this.messagingAdapter.sendMessage(
         `Session completed: ${sessionName}\n` +
         `Completed: ${result.completedTasks} tasks`
       );
     } else {
       await this.sessionManager.updateSessionStatus(sessionName, 'FAILED');
+      this.logger.verbose(`  Session failed after ${(taskElapsed / 1000).toFixed(1)}s: ${result.errors.map(e => e.error).join(', ')}`);
       await this.messagingAdapter.sendMessage(
         `Session failed: ${sessionName}\n` +
         `Errors: ${result.errors.map((e) => e.error).join(', ')}`
@@ -392,8 +452,10 @@ export class MiloAgent {
     message: PendingMessage
   ): Promise<void> {
     const sessionName = intent.sessionName ?? message.sessionName;
+    this.logger.verbose(`  Looking up target session: "${sessionName ?? 'none'}"`);
 
     if (!sessionName) {
+      this.logger.verbose('  No session name found, notifying user');
       await this.messagingAdapter.sendMessage(
         'No active session to send message to. Start a new session first.'
       );
@@ -403,14 +465,16 @@ export class MiloAgent {
     // Get the session
     const session = await this.sessionManager.getSession(sessionName);
     if (!session) {
+      this.logger.verbose(`  Session "${sessionName}" not found in session manager`);
       await this.messagingAdapter.sendMessage(
         `Session "${sessionName}" not found.`
       );
       return;
     }
 
+    this.logger.verbose(`  Session found (status: ${session.status}), forwarding message`);
+
     // Forward the message to the session
-    // This would integrate with Claude Code session if active
     this.logger.info(`Message for session ${sessionName}: ${message.content}`);
 
     await this.messagingAdapter.sendMessage(

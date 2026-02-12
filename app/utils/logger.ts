@@ -1,4 +1,4 @@
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogLevel = 'debug' | 'verbose' | 'info' | 'warn' | 'error';
 
 export interface LoggerOptions {
   level?: LogLevel;
@@ -8,13 +8,15 @@ export interface LoggerOptions {
 
 const LOG_LEVELS: Record<LogLevel, number> = {
   debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
+  verbose: 1,
+  info: 2,
+  warn: 3,
+  error: 4,
 };
 
 const LOG_COLORS: Record<LogLevel, string> = {
   debug: '\x1b[90m', // Gray
+  verbose: '\x1b[94m', // Light blue
   info: '\x1b[36m', // Cyan
   warn: '\x1b[33m', // Yellow
   error: '\x1b[31m', // Red
@@ -86,6 +88,10 @@ export class Logger {
 
   debug(...args: unknown[]): void {
     this.log('debug', ...args);
+  }
+
+  verbose(...args: unknown[]): void {
+    this.log('verbose', ...args);
   }
 
   info(...args: unknown[]): void {

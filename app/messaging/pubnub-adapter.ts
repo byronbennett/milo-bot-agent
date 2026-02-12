@@ -25,6 +25,8 @@ export class PubNubAdapter implements MessagingAdapter {
   private refreshTimer: NodeJS.Timeout | null = null;
 
   public isConnected: boolean = false;
+  /** When true, sendMessage skips REST persistence and only publishes via PubNub */
+  public pubsubOnly: boolean = false;
 
   constructor(options: PubNubAdapterOptions) {
     this.apiUrl = options.apiUrl.replace(/\/$/, '');
@@ -74,49 +76,60 @@ export class PubNubAdapter implements MessagingAdapter {
       subscribeKey: tokenData.subscribeKey,
       publishKey: tokenData.publishKey,
       userId: tokenData.userId,
-      authKey: this.token,
       restore: true, // Auto-reconnect and replay missed messages
     });
 
-    // Add message listener
-    this.pubnub.addListener({
-      message: (event) => {
-        if (event.channel === this.cmdChannel) {
-          this.handleIncomingMessage(event.message as unknown as PubNubCommandMessage);
-        }
-      },
-      status: (event) => {
-        if (event.category === 'PNConnectedCategory') {
-          this.isConnected = true;
-          this.logger.info('PubNub connected');
-        } else if (event.category === 'PNDisconnectedCategory') {
-          this.isConnected = false;
-          this.logger.warn('PubNub disconnected');
-        } else if (event.category === 'PNReconnectedCategory') {
-          this.isConnected = true;
-          this.logger.info('PubNub reconnected');
-        }
-      },
-    });
+    // Set PAM v3 token (must use setToken, not authKey which is PAM v2)
+    this.pubnub.setToken(this.token);
 
-    // Subscribe to command channel with Presence
-    this.pubnub.subscribe({
-      channels: [this.cmdChannel],
-      withPresence: true,
-    });
+    // Wait for the subscription to actually be confirmed or denied
+    const pubnub = this.pubnub;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('PubNub subscription timed out after 10s'));
+      }, 10000);
 
-    // Set presence state with agent info
-    this.pubnub.setState({
-      channels: [this.cmdChannel],
-      state: {
-        startedAt: new Date().toISOString(),
-      },
+      pubnub.addListener({
+        message: (event) => {
+          this.logger.verbose(`PubNub message event on channel: ${event.channel}`);
+          this.logger.debug('PubNub message payload:', event.message);
+          if (event.channel === this.cmdChannel) {
+            this.handleIncomingMessage(event.message as unknown as PubNubCommandMessage);
+          } else {
+            this.logger.verbose(`Ignoring message on non-cmd channel: ${event.channel} (expected: ${this.cmdChannel})`);
+          }
+        },
+        status: (event) => {
+          this.logger.verbose(`PubNub status: ${event.category}`);
+          if (event.category === 'PNConnectedCategory') {
+            this.isConnected = true;
+            this.logger.info('PubNub subscription confirmed');
+            clearTimeout(timeout);
+            resolve();
+          } else if (event.category === 'PNAccessDeniedCategory') {
+            this.isConnected = false;
+            this.logger.warn('PubNub access denied — token lacks subscribe permissions');
+            clearTimeout(timeout);
+            reject(new Error('PubNub access denied — token lacks subscribe permissions'));
+          } else if (event.category === 'PNDisconnectedCategory') {
+            this.isConnected = false;
+            this.logger.warn('PubNub disconnected');
+          } else if (event.category === 'PNReconnectedCategory') {
+            this.isConnected = true;
+            this.logger.info('PubNub reconnected');
+          }
+        },
+      });
+
+      // Subscribe to command channel (no presence — avoids extra permission requirements)
+      pubnub.subscribe({
+        channels: [this.cmdChannel],
+      });
     });
 
     // Schedule token refresh
     this.scheduleRefresh();
 
-    this.isConnected = true;
     this.logger.info('PubNub connection established');
   }
 
@@ -124,7 +137,11 @@ export class PubNubAdapter implements MessagingAdapter {
    * Handle an incoming PubNub message on the cmd channel
    */
   private handleIncomingMessage(msg: PubNubCommandMessage): void {
-    if (msg.type !== 'user_message') return;
+    this.logger.verbose(`PubNub cmd message: type=${msg.type}, messageId=${msg.messageId}`);
+    if (msg.type !== 'user_message') {
+      this.logger.verbose(`Ignoring non-user_message type: ${msg.type}`);
+      return;
+    }
 
     const pending: PendingMessage = {
       id: msg.messageId,
@@ -134,7 +151,8 @@ export class PubNubAdapter implements MessagingAdapter {
       createdAt: msg.timestamp,
     };
 
-    this.logger.debug(`Real-time message received: ${msg.messageId}`);
+    this.logger.info(`Real-time message received: ${msg.messageId}`);
+    this.logger.verbose(`Message content: "${msg.content.slice(0, 100)}"`);
 
     // Process asynchronously - don't block the listener
     this.onMessage(pending).catch((err) => {
@@ -218,14 +236,23 @@ export class PubNubAdapter implements MessagingAdapter {
    * Dual-write: REST API for DB persistence + PubNub for instant delivery
    */
   async sendMessage(content: string, sessionId?: string | null): Promise<void> {
-    // 1. Persist to DB via REST (source of truth)
-    await this.request('POST', '/messages/send', {
-      sessionId: sessionId || null,
-      content,
-    });
+    this.logger.verbose(`Sending message (${content.length} chars, session: ${sessionId ?? 'none'}, pubsubOnly: ${this.pubsubOnly})`);
+
+    // 1. Persist to DB via REST (unless responding to a real-time message)
+    if (!this.pubsubOnly) {
+      this.logger.verbose('  Persisting message via REST...');
+      await this.request('POST', '/messages/send', {
+        sessionId: sessionId || null,
+        content,
+      });
+      this.logger.verbose('  REST persist OK');
+    } else {
+      this.logger.verbose('  Skipping REST persist (pubsubOnly mode)');
+    }
 
     // 2. Publish to PubNub for instant delivery to browser
     if (this.pubnub && this.isConnected) {
+      this.logger.verbose(`  Publishing to PubNub evt channel: ${this.evtChannel}`);
       try {
         const message: PubNubEventMessage = {
           type: 'agent_message',
@@ -235,14 +262,17 @@ export class PubNubAdapter implements MessagingAdapter {
           timestamp: new Date().toISOString(),
         };
 
-        await this.pubnub.publish({
+        const publishResult = await this.pubnub.publish({
           channel: this.evtChannel,
           message: message as unknown as PubNub.Payload,
         });
+        this.logger.verbose(`  PubNub publish OK (timetoken: ${publishResult.timetoken})`);
       } catch (pubErr) {
         // PubNub failure is non-fatal - message is in DB
         this.logger.warn('PubNub publish failed (message saved to DB):', pubErr);
       }
+    } else {
+      this.logger.verbose(`  Skipping PubNub publish (pubnub: ${!!this.pubnub}, connected: ${this.isConnected})`);
     }
   }
 

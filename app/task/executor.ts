@@ -46,16 +46,19 @@ export async function executeTask(
   }
 
   logger.info(`Executing task [${task.id}]: ${task.description}`);
+  logger.verbose(`    Handler: ${task.type}, retries: ${task.maxRetries ?? 0}`);
 
   try {
     // Execute with retry if configured
     const maxRetries = task.maxRetries ?? 0;
 
     if (maxRetries > 0) {
+      logger.verbose(`    Executing with retry (max ${maxRetries})...`);
       return await withRetry(() => handler(task, context), {
         maxRetries,
         onRetry: (attempt) => {
           task.retryCount = attempt;
+          logger.verbose(`    Retry attempt ${attempt}/${maxRetries}`);
         },
       });
     }
@@ -92,12 +95,18 @@ registerHandler('claude_code', async (task, context) => {
   const projectPath = context.projectPath ?? context.workspaceDir;
 
   // Open a session if we don't have one
+  logger.verbose(`    Opening Claude Code session in ${projectPath}`);
   const session = await openSession({ projectPath });
+  logger.verbose(`    Session ${session.id} ready`);
 
   try {
+    logger.verbose(`    Sending prompt (${prompt.length} chars) to session ${session.id}`);
+    const promptStart = Date.now();
     const result = await sendPrompt(session.id, prompt, { systemPrompt });
+    const promptElapsed = Date.now() - promptStart;
 
     if (result.success) {
+      logger.verbose(`    Claude Code responded (cost: $${result.costUsd?.toFixed(4) ?? '?'}, duration: ${((result.durationMs ?? promptElapsed) / 1000).toFixed(1)}s)`);
       return {
         success: true,
         output: result.result,
@@ -108,8 +117,10 @@ registerHandler('claude_code', async (task, context) => {
       };
     }
 
+    logger.verbose(`    Claude Code prompt failed: ${result.error}`);
     return { success: false, error: result.error };
   } finally {
+    logger.verbose(`    Closing session ${session.id}`);
     closeSession(session.id);
   }
 });

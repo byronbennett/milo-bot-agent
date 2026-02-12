@@ -49,6 +49,7 @@ export async function openSession(options: CCSessionOptions): Promise<CCSession>
   const now = new Date();
 
   logger.info(`Opening Claude Code session ${sessionId} in ${options.projectPath}`);
+  logger.verbose(`    Initializing Claude Code SDK (workDir: ${options.projectPath})`);
 
   try {
     // Initialize Claude Code SDK
@@ -58,6 +59,7 @@ export async function openSession(options: CCSessionOptions): Promise<CCSession>
     });
 
     // Create a new session
+    logger.verbose(`    Creating new SDK session...`);
     const sdkSession = claude.newSession();
 
     const session: CCSession = {
@@ -74,6 +76,7 @@ export async function openSession(options: CCSessionOptions): Promise<CCSession>
       sdkSession,
     });
 
+    logger.verbose(`    Active CC sessions: ${sessions.size}`);
     logger.info(`Claude Code session ${sessionId} ready`);
     return session;
   } catch (error) {
@@ -101,6 +104,7 @@ export async function sendPrompt(
   }
 
   logger.debug(`Sending prompt to session ${sessionId}: ${prompt.slice(0, 100)}...`);
+  logger.verbose(`    Session ${sessionId} status: ${state.session.status} → working`);
 
   try {
     // Update status
@@ -108,15 +112,21 @@ export async function sendPrompt(
     state.session.lastActivityAt = new Date();
 
     // Send prompt to Claude Code
+    logger.verbose(`    Waiting for Claude Code response...`);
+    const promptStart = Date.now();
     const response = await state.sdkSession.prompt({
       prompt,
       systemPrompt: options.systemPrompt,
       appendSystemPrompt: options.appendSystemPrompt,
     });
+    const elapsed = Date.now() - promptStart;
 
     // Update session state
     state.session.status = 'ready';
     state.session.lastActivityAt = new Date();
+
+    logger.verbose(`    Response received in ${(elapsed / 1000).toFixed(1)}s (cost: $${response.cost_usd?.toFixed(4) ?? '?'})`);
+    logger.verbose(`    Result length: ${response.result?.length ?? 0} chars`);
 
     return {
       success: true,
@@ -245,12 +255,14 @@ export function closeSession(sessionId: string): boolean {
   }
 
   logger.info(`Closing Claude Code session ${sessionId}`);
+  logger.verbose(`    Session duration: ${((Date.now() - state.session.startedAt.getTime()) / 1000).toFixed(1)}s`);
 
   state.session.status = 'completed';
   state.session.lastActivityAt = new Date();
 
   // Remove from active sessions
   sessions.delete(sessionId);
+  logger.verbose(`    Remaining active CC sessions: ${sessions.size}`);
 
   return true;
 }
