@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -e
+
+echo ""
+echo "🤖 Installing MiloBot Agent..."
+echo ""
+
+# Install dependencies
+echo "📦 Installing dependencies..."
+pnpm install
+
+# Build and link globally
+echo ""
+echo "🔨 Building and linking CLI..."
+pnpm link-cli
+
+echo ""
+echo "✅ milo command is now available!"
+echo ""
+
+# Run init
+exec milo init
