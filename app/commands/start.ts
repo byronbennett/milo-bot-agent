@@ -1,7 +1,11 @@
+import { existsSync } from 'fs';
 import { Command } from 'commander';
+import { confirm } from '@inquirer/prompts';
 import { MiloAgent } from '../agent';
 import { loadConfig } from '../config';
+import { getDefaultConfigPath } from '../config/defaults';
 import { Logger } from '../utils/logger';
+import { runInit } from './init';
 
 const logger = new Logger({ prefix: '[start]' });
 
@@ -13,6 +17,36 @@ export const startCommand = new Command('start')
   .option('--foreground', 'Run in foreground (don\'t daemonize)')
   .option('--no-pubnub', 'Disable PubNub real-time messaging (use polling)')
   .action(async (options) => {
+    // Check if workspace is initialized
+    const configPath = options.config || getDefaultConfigPath();
+    if (!existsSync(configPath)) {
+      if (process.stdout.isTTY) {
+        console.log('');
+        logger.info('MiloBot workspace not initialized.');
+        console.log('');
+        const shouldInit = await confirm({
+          message: 'Run setup now?',
+          default: true,
+        });
+
+        if (shouldInit) {
+          await runInit({});
+          // Re-check that config was actually created
+          if (!existsSync(configPath)) {
+            logger.error('Setup did not complete. Run `milo init` to try again.');
+            process.exit(1);
+          }
+          console.log('');
+        } else {
+          logger.info('Run `milo init` to set up your workspace.');
+          process.exit(0);
+        }
+      } else {
+        logger.error('MiloBot workspace not initialized. Run `milo init` first.');
+        process.exit(1);
+      }
+    }
+
     logger.info('Starting MiloBot agent...');
 
     // Load config first so .env file and keychain are read into process.env
@@ -20,8 +54,8 @@ export const startCommand = new Command('start')
 
     // Check for API key (now available from .env or keychain)
     if (!process.env.MILO_API_KEY) {
-      logger.error('MILO_API_KEY environment variable is not set.');
-      logger.error('Run `milo init` to set up your workspace and API key.');
+      logger.error('MILO_API_KEY is not set.');
+      logger.error('Run `milo init` to configure your API key.');
       process.exit(1);
     }
 
