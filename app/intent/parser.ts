@@ -162,7 +162,7 @@ export async function parseIntentWithAI(
   config: AgentConfig,
   options: { confidenceThreshold?: number; skipAI?: boolean } = {}
 ): Promise<ParsedIntent> {
-  const { confidenceThreshold = 0.5, skipAI = false } = options;
+  const { confidenceThreshold = 0.9, skipAI = false } = options;
 
   // Try pattern matching first
   const patternIntent = parseIntent(message, config);
@@ -173,8 +173,8 @@ export async function parseIntentWithAI(
     return patternIntent;
   }
 
-  // If pattern failed and AI is available, try AI
-  if (patternIntent.type === 'unknown' && isAIAvailable()) {
+  // If pattern failed or low confidence, try AI fallback
+  if (isAIAvailable()) {
     try {
       logger.verbose('  Pattern matching insufficient, falling back to AI...');
       const aiIntent = await parseWithAI(message.content, config);
@@ -186,7 +186,7 @@ export async function parseIntentWithAI(
     } catch (error) {
       logger.warn('AI intent parsing failed:', error);
     }
-  } else if (patternIntent.type === 'unknown') {
+  } else {
     logger.verbose('  AI not available for fallback parsing');
   }
 
@@ -201,14 +201,20 @@ async function parseWithAI(
   content: string,
   config: AgentConfig
 ): Promise<ParsedIntent> {
+  const userPrompt = `Parse this message: "${content}"`;
+  logger.verbose('  AI prompt (system):', INTENT_PARSER_SYSTEM);
+  logger.verbose('  AI prompt (user):', userPrompt);
+
   const response = await complete(
-    `Parse this message: "${content}"`,
+    userPrompt,
     {
       system: INTENT_PARSER_SYSTEM,
       maxTokens: 128,
       temperature: 0,
     }
   );
+
+  logger.verbose('  AI raw response:', response);
 
   try {
     // Strip markdown code fences if present (e.g. ```json ... ```)

@@ -18,7 +18,7 @@ import type { AgentConfig } from './config';
 import { WebAppAdapter, PubNubAdapter, type MessagingAdapter } from './messaging';
 import { SessionManager } from './session/manager';
 import { HeartbeatScheduler } from './scheduler/heartbeat';
-import { Logger } from './utils/logger';
+import { Logger, logger } from './utils/logger';
 import { parseIntentWithAI, describeIntent, isConfident } from './intent';
 import { enhancePrompt } from './prompt';
 import { runTasks, createStandardTaskList } from './task';
@@ -61,6 +61,9 @@ export class MiloAgent {
       level: logLevel,
       prefix: `[${this.config.agentName}]`,
     });
+
+    // Propagate log level to the default singleton used by parser, ai-client, etc.
+    logger.setLevel(logLevel);
 
     // Always create a REST adapter for fallback and DB operations
     this.restAdapter = new WebAppAdapter({
