@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node --import tsx/esm --watch app/bin/milo.ts start --foreground",
     "build": "tsup",
+    "link-cli": "tsup && pnpm link --global",
     "start": "node dist/index.js",
     "lint": "eslint app/",
     "typecheck": "tsc --noEmit",
