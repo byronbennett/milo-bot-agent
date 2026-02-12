@@ -196,6 +196,8 @@ export type IntentType =
   | 'open_session'
   | 'send_message'
   | 'answer_question'
+  | 'question'
+  | 'greeting'
   | 'list_sessions'
   | 'cancel_session'
   | 'set_rule'

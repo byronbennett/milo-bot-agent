@@ -144,6 +144,24 @@ export function generateSessionName(task: string, maxLength = 50): string {
 }
 
 /**
+ * Common greeting words/phrases
+ */
+const GREETING_PATTERNS = [
+  /^(hi|hello|hey|yo|sup|howdy|hola|greetings)\b/i,
+  /^good\s+(morning|afternoon|evening|day)\b/i,
+  /^what'?s\s+up\b/i,
+  /^how'?s\s+it\s+going\b/i,
+];
+
+/**
+ * Check if content is a greeting
+ */
+export function matchGreetingPatterns(content: string): boolean {
+  const trimmed = content.trim();
+  return GREETING_PATTERNS.some((p) => p.test(trimmed));
+}
+
+/**
  * Check if content looks like a task (starts with verb or has task indicators)
  */
 export function looksLikeTask(content: string): boolean {

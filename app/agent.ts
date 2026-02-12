@@ -20,6 +20,7 @@ import { SessionManager } from './session/manager';
 import { HeartbeatScheduler } from './scheduler/heartbeat';
 import { Logger, logger } from './utils/logger';
 import { parseIntentWithAI, describeIntent, isConfident } from './intent';
+import { isAIAvailable } from './utils/ai-client';
 import { enhancePrompt } from './prompt';
 import { runTasks, createStandardTaskList } from './task';
 import { shouldAutoAnswer } from './auto-answer';
@@ -318,6 +319,7 @@ export class MiloAgent {
     try {
       // Step 1: Parse intent
       this.logger.verbose('Step 1: Parsing intent...');
+      this.logger.verbose(`  AI available: ${isAIAvailable()}, ANTHROPIC_API_KEY set: ${!!process.env.ANTHROPIC_API_KEY}`);
       const intent = await parseIntentWithAI(message, this.config);
       this.logger.verbose(`  Intent: ${intent.type} (confidence: ${intent.confidence})`);
       this.logger.verbose(`  ${describeIntent(intent)}`);
@@ -331,6 +333,22 @@ export class MiloAgent {
 
         case 'send_message':
           await this.handleSendMessage(intent, message);
+          break;
+
+        case 'question':
+          this.logger.verbose('  Answering question');
+          await this.messagingAdapter.sendMessage(
+            intent.answer ?? 'I\'m not sure how to answer that.',
+            message.sessionId
+          );
+          break;
+
+        case 'greeting':
+          this.logger.verbose('  Responding to greeting');
+          await this.messagingAdapter.sendMessage(
+            intent.answer ?? 'Hello! How can I help you today?',
+            message.sessionId
+          );
           break;
 
         case 'unknown':
