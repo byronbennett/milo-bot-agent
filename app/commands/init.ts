@@ -278,17 +278,20 @@ function extractServerUrl(apiUrl: string): string {
   return apiUrl.replace(/\/api\/?$/, '');
 }
 
-export const initCommand = new Command('init')
-  .description('Initialize MiloBot agent workspace')
-  .option('-k, --api-key <key>', 'API key from milobot.dev')
-  .option('--anthropic-key <key>', 'Anthropic API key for Milo AI features')
-  .option('--ai-model <model>', 'Model for Milo AI calls (not Claude Code)')
-  .option('-d, --dir <directory>', 'Workspace directory')
-  .option('-n, --name <name>', 'Agent name')
-  .option('-s, --server-url <url>', 'Server URL (default: https://www.milobot.dev)')
-  .option('-y, --yes', 'Use defaults, non-interactive mode')
-  .option('--no-browser', 'Skip opening browser for API key')
-  .action(async (options) => {
+/**
+ * Run the init flow programmatically.
+ * Accepts the same options object that commander would pass.
+ */
+export async function runInit(options: {
+  apiKey?: string;
+  anthropicKey?: string;
+  aiModel?: string;
+  dir?: string;
+  name?: string;
+  serverUrl?: string;
+  yes?: boolean;
+  browser?: boolean;
+} = {}): Promise<void> {
     console.log('');
     console.log('🤖 Welcome to MiloBot Setup!');
     console.log('');
@@ -716,4 +719,16 @@ dist/
       console.log(`  ${!apiKey && !anthropicKey ? '4' : '3'}. Run \`milo start\` to connect your agent`);
     }
     console.log('');
-  });
+}
+
+export const initCommand = new Command('init')
+  .description('Initialize MiloBot agent workspace')
+  .option('-k, --api-key <key>', 'API key from milobot.dev')
+  .option('--anthropic-key <key>', 'Anthropic API key for Milo AI features')
+  .option('--ai-model <model>', 'Model for Milo AI calls (not Claude Code)')
+  .option('-d, --dir <directory>', 'Workspace directory')
+  .option('-n, --name <name>', 'Agent name')
+  .option('-s, --server-url <url>', 'Server URL (default: https://www.milobot.dev)')
+  .option('-y, --yes', 'Use defaults, non-interactive mode')
+  .option('--no-browser', 'Skip opening browser for API key')
+  .action(runInit);
