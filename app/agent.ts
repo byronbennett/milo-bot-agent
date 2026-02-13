@@ -20,7 +20,7 @@ import { SessionManager } from './session/manager';
 import { HeartbeatScheduler } from './scheduler/heartbeat';
 import { Logger, logger } from './utils/logger';
 import { parseIntentWithAI, describeIntent, isConfident } from './intent';
-import { isAIAvailable, getAIClient, getAIModel } from './utils/ai-client';
+import { isAIAvailable, getAIClient, getAIModel, complete } from './utils/ai-client';
 import { enhancePrompt } from './prompt';
 import { runTasks, createStandardTaskList } from './task';
 import { shouldAutoAnswer } from './auto-answer';
@@ -399,8 +399,29 @@ export class MiloAgent {
     intent: { sessionName?: string; projectName?: string; taskDescription?: string },
     message: PendingMessage
   ): Promise<void> {
-    const sessionName = intent.sessionName ?? `session-${Date.now()}`;
     const taskDescription = intent.taskDescription ?? message.content;
+
+    // Generate AI session name (5 words or less, dashed)
+    let sessionName: string;
+    try {
+      const nameResponse = await complete(
+        `Generate a short descriptive name for this coding task. Rules:
+- 5 words or less
+- lowercase
+- separated by dashes
+- no quotes or punctuation
+- example: "fix-login-auth-bug"
+
+Task: "${taskDescription}"
+
+Respond with ONLY the name, nothing else.`,
+        { maxTokens: 50, temperature: 0.3 }
+      );
+      sessionName = nameResponse.trim().replace(/[^a-z0-9-]/g, '').slice(0, 60);
+      if (!sessionName) sessionName = `session-${Date.now()}`;
+    } catch {
+      sessionName = intent.sessionName ?? `session-${Date.now()}`;
+    }
 
     // Check concurrent session limit
     this.logger.verbose('  Checking session limits...');
@@ -432,6 +453,26 @@ export class MiloAgent {
     this.logger.verbose(`  Creating session file: ${sessionName}`);
     const session = await this.sessionManager.createSession(sessionName, enhanceResult.prompt);
     this.logger.verbose(`  Session file created`);
+
+    // Update session name in the web app DB (session was created with "new-session" name)
+    if (message.sessionId) {
+      try {
+        await this.restAdapter.updateSession(message.sessionId, { name: sessionName });
+
+        // Publish name update via PubNub
+        if (this.pubnubAdapter) {
+          await this.pubnubAdapter.publishSessionUpdate(
+            message.sessionId,
+            'active',
+            sessionName,
+            sessionName
+          );
+        }
+        this.logger.verbose(`  Updated session name to: ${sessionName}`);
+      } catch (error) {
+        this.logger.warn('Failed to update session name:', error);
+      }
+    }
 
     // Notify user
     this.logger.verbose('  Notifying user of session start...');
