@@ -146,7 +146,8 @@ export class PubNubAdapter implements MessagingAdapter {
     const pending: PendingMessage = {
       id: msg.messageId,
       sessionId: msg.sessionId,
-      sessionName: null, // Not available from PubNub payload
+      sessionName: null,
+      sessionType: msg.sessionType || 'bot',
       content: msg.content,
       createdAt: msg.timestamp,
     };
@@ -235,14 +236,14 @@ export class PubNubAdapter implements MessagingAdapter {
    * Send a message to the user
    * Dual-write: REST API for DB persistence + PubNub for instant delivery
    */
-  async sendMessage(content: string, sessionId?: string | null): Promise<void> {
-    this.logger.verbose(`Sending message (${content.length} chars, session: ${sessionId ?? 'none'}, pubsubOnly: ${this.pubsubOnly})`);
+  async sendMessage(content: string, sessionId: string): Promise<void> {
+    this.logger.verbose(`Sending message (${content.length} chars, session: ${sessionId}, pubsubOnly: ${this.pubsubOnly})`);
 
     // 1. Persist to DB via REST (unless responding to a real-time message)
     if (!this.pubsubOnly) {
       this.logger.verbose('  Persisting message via REST...');
       await this.request('POST', '/messages/send', {
-        sessionId: sessionId || null,
+        sessionId,
         content,
       });
       this.logger.verbose('  REST persist OK');
@@ -256,8 +257,8 @@ export class PubNubAdapter implements MessagingAdapter {
       try {
         const message: PubNubEventMessage = {
           type: 'agent_message',
-          agentId: '', // Server knows from channel context
-          sessionId: sessionId || null,
+          agentId: '',
+          sessionId,
           content,
           timestamp: new Date().toISOString(),
         };
@@ -311,7 +312,7 @@ export class PubNubAdapter implements MessagingAdapter {
   /**
    * Publish a session update event to the browser
    */
-  async publishSessionUpdate(sessionId: string, status: string, name: string): Promise<void> {
+  async publishSessionUpdate(sessionId: string, status: string, name: string, sessionName?: string): Promise<void> {
     if (!this.pubnub || !this.isConnected) return;
 
     try {
@@ -320,6 +321,7 @@ export class PubNubAdapter implements MessagingAdapter {
         agentId: '',
         sessionId,
         sessionStatus: status,
+        sessionName: sessionName || name,
         content: name,
         timestamp: new Date().toISOString(),
       };
@@ -330,6 +332,41 @@ export class PubNubAdapter implements MessagingAdapter {
       });
     } catch (err) {
       this.logger.warn('PubNub session update publish failed:', err);
+    }
+  }
+
+  /**
+   * Send a message with context size information
+   */
+  async sendMessageWithContext(
+    content: string,
+    sessionId: string,
+    contextSize?: { usedTokens: number; maxTokens: number }
+  ): Promise<void> {
+    // Persist to DB
+    if (!this.pubsubOnly) {
+      await this.request('POST', '/messages/send', { sessionId, content });
+    }
+
+    // Publish to PubNub with context size
+    if (this.pubnub && this.isConnected) {
+      try {
+        const message: PubNubEventMessage = {
+          type: 'agent_message',
+          agentId: '',
+          sessionId,
+          content,
+          contextSize,
+          timestamp: new Date().toISOString(),
+        };
+
+        await this.pubnub.publish({
+          channel: this.evtChannel,
+          message: message as unknown as PubNub.Payload,
+        });
+      } catch (pubErr) {
+        this.logger.warn('PubNub publish failed:', pubErr);
+      }
     }
   }
 

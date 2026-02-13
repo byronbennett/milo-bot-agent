@@ -48,9 +48,9 @@ export class WebAppAdapter implements MessagingAdapter {
   /**
    * Send a message to the user
    */
-  async sendMessage(content: string, sessionId?: string | null): Promise<void> {
+  async sendMessage(content: string, sessionId: string): Promise<void> {
     await this.request('POST', '/messages/send', {
-      sessionId: sessionId || null,
+      sessionId,
       content,
     });
   }
@@ -82,5 +82,28 @@ export class WebAppAdapter implements MessagingAdapter {
    */
   async sendHeartbeat(activeSessions: string[] = []): Promise<HeartbeatResponse> {
     return this.request<HeartbeatResponse>('POST', '/agent/heartbeat', { activeSessions });
+  }
+
+  /**
+   * Fetch message history for a session
+   */
+  async getSessionHistory(
+    sessionId: string,
+    limit: number = 50
+  ): Promise<Array<{ sender: string; content: string }>> {
+    const response = await this.request<{
+      messages: Array<{ sender: string; content: string }>;
+    }>('GET', `/messages/history?sessionId=${sessionId}&limit=${limit}`);
+    return response.messages;
+  }
+
+  /**
+   * Update a session (name, status, etc.)
+   */
+  async updateSession(
+    sessionId: string,
+    updates: { name?: string; status?: string; completionMessage?: string }
+  ): Promise<void> {
+    await this.request('PATCH', `/sessions/${sessionId}`, updates);
   }
 }

@@ -8,7 +8,8 @@ export interface PubNubCommandMessage {
   type: 'user_message';
   messageId: string;
   agentId: string;
-  sessionId: string | null;
+  sessionId: string;
+  sessionType: 'chat' | 'bot';
   content: string;
   timestamp: string;
 }
@@ -18,21 +19,27 @@ export interface PubNubEventMessage {
   type: 'agent_message' | 'session_update' | 'agent_status';
   messageId?: string;
   agentId: string;
-  sessionId?: string | null;
+  sessionId?: string;
   content?: string;
   sessionStatus?: string;
+  sessionName?: string;
+  sessionType?: 'chat' | 'bot';
+  contextSize?: {
+    usedTokens: number;
+    maxTokens: number;
+  };
   timestamp: string;
 }
 
 /** Response from POST /api/pubnub/token/agent */
 export interface PubNubTokenResponse {
   token: string;
-  ttl: number;         // seconds
-  expiresAt: string;   // ISO 8601
-  userId: string;      // PubNub UUID for this agent
+  ttl: number;
+  expiresAt: string;
+  userId: string;
   channels: {
-    cmd: string;       // Full cmd channel name
-    evt: string;       // Full evt channel name
+    cmd: string;
+    evt: string;
   };
   subscribeKey: string;
   publishKey: string;
