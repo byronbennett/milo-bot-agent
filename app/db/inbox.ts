@@ -25,7 +25,15 @@ export function insertInbox(db: Database.Database, record: Omit<InboxRecord, 're
     INSERT OR IGNORE INTO inbox (event_id, tenant_id, user_id, agent_host_id, session_id, session_name, session_type, content, ui_action)
     VALUES (@event_id, @tenant_id, @user_id, @agent_host_id, @session_id, @session_name, @session_type, @content, @ui_action)
   `);
-  const result = stmt.run(record);
+  // better-sqlite3 requires all named params present; default optionals to null
+  const result = stmt.run({
+    tenant_id: null,
+    user_id: null,
+    agent_host_id: null,
+    session_name: null,
+    ui_action: null,
+    ...record,
+  });
   return result.changes > 0; // false = duplicate
 }
 

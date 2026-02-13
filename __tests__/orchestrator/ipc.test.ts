@@ -1,0 +1,79 @@
+import { sendIPC, readIPC } from '../../app/orchestrator/ipc.js';
+import { PassThrough } from 'stream';
+import type { IPCMessage } from '../../app/orchestrator/ipc-types.js';
+
+describe('IPC helpers', () => {
+  test('sendIPC writes JSON line to stream', () => {
+    const stream = new PassThrough();
+    const chunks: string[] = [];
+    stream.on('data', (chunk) => chunks.push(chunk.toString()));
+
+    const msg: IPCMessage = {
+      type: 'WORKER_READY',
+      sessionId: 'test-session',
+      pid: 1234,
+    };
+
+    sendIPC(stream, msg);
+    stream.end();
+
+    const written = chunks.join('');
+    expect(written).toBe(JSON.stringify(msg) + '\n');
+  });
+
+  test('readIPC yields parsed messages from stream', async () => {
+    const stream = new PassThrough();
+
+    const msg1: IPCMessage = { type: 'WORKER_READY', sessionId: 's1', pid: 1 };
+    const msg2: IPCMessage = { type: 'WORKER_TASK_STARTED', taskId: 't1', sessionId: 's1' };
+
+    stream.write(JSON.stringify(msg1) + '\n');
+    stream.write(JSON.stringify(msg2) + '\n');
+    stream.end();
+
+    const messages: IPCMessage[] = [];
+    for await (const m of readIPC(stream)) {
+      messages.push(m);
+    }
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toEqual(msg1);
+    expect(messages[1]).toEqual(msg2);
+  });
+
+  test('readIPC skips malformed lines', async () => {
+    const stream = new PassThrough();
+
+    stream.write('not json\n');
+    stream.write(JSON.stringify({ type: 'WORKER_READY', sessionId: 's1', pid: 1 }) + '\n');
+    stream.end();
+
+    const messages: IPCMessage[] = [];
+    for await (const m of readIPC(stream)) {
+      messages.push(m);
+    }
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('WORKER_READY');
+  });
+
+  test('readIPC handles chunked data across line boundaries', async () => {
+    const stream = new PassThrough();
+    const msg: IPCMessage = { type: 'WORKER_READY', sessionId: 's1', pid: 1 };
+    const json = JSON.stringify(msg);
+
+    // Split the JSON across two chunks
+    const mid = Math.floor(json.length / 2);
+    stream.write(json.slice(0, mid));
+    stream.write(json.slice(mid) + '\n');
+    stream.end();
+
+    const messages: IPCMessage[] = [];
+    for await (const m of readIPC(stream)) {
+      messages.push(m);
+    }
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual(msg);
+  });
+});
