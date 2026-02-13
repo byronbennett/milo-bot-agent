@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import { Command } from 'commander';
 import { confirm } from '@inquirer/prompts';
-import { MiloAgent } from '../agent';
+import { Orchestrator } from '../orchestrator/index.js';
 import { loadConfig } from '../config';
 import { getDefaultConfigPath } from '../config/defaults';
 import { Logger } from '../utils/logger';
@@ -66,27 +66,26 @@ export const startCommand = new Command('start')
     }
 
     try {
-      const agent = new MiloAgent({
+      const orchestrator = new Orchestrator({
         config,
         debug: options.debug,
         verbose: options.verbose,
       });
 
-      await agent.start();
+      await orchestrator.start();
 
       // Keep process running
       logger.info('Agent is running. Press Ctrl+C to stop.');
 
-      // Handle graceful shutdown
+      // Orchestrator registers its own SIGINT/SIGTERM handlers,
+      // but add a fallback here for the CLI layer
       process.on('SIGINT', async () => {
-        logger.info('Received SIGINT, shutting down...');
-        await agent.stop();
+        await orchestrator.stop();
         process.exit(0);
       });
 
       process.on('SIGTERM', async () => {
-        logger.info('Received SIGTERM, shutting down...');
-        await agent.stop();
+        await orchestrator.stop();
         process.exit(0);
       });
 
