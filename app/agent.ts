@@ -20,7 +20,7 @@ import { SessionManager } from './session/manager';
 import { HeartbeatScheduler } from './scheduler/heartbeat';
 import { Logger, logger } from './utils/logger';
 import { parseIntentWithAI, describeIntent, isConfident } from './intent';
-import { isAIAvailable } from './utils/ai-client';
+import { isAIAvailable, getAIClient, getAIModel } from './utils/ai-client';
 import { enhancePrompt } from './prompt';
 import { runTasks, createStandardTaskList } from './task';
 import { shouldAutoAnswer } from './auto-answer';
@@ -318,6 +318,15 @@ export class MiloAgent {
     this.logger.info(`Received: ${message.content}`);
 
     try {
+      // Route by session type: chat sessions get direct AI response
+      if (message.sessionType === 'chat') {
+        await this.handleChatMessage(message);
+        const elapsed = Date.now() - startTime;
+        this.logger.verbose(`Chat message processing complete (${elapsed}ms)`);
+        return;
+      }
+
+      // Bot session: use intent parser (existing flow)
       // Step 1: Parse intent
       this.logger.verbose('Step 1: Parsing intent...');
       this.logger.verbose(`  AI available: ${isAIAvailable()}, ANTHROPIC_API_KEY set: ${!!process.env.ANTHROPIC_API_KEY}`);
@@ -357,14 +366,16 @@ export class MiloAgent {
           this.logger.verbose('  Intent unknown, sending clarification to user');
           if (isConfident(intent, 0.3)) {
             await this.messagingAdapter.sendMessage(
-              `I'm not sure what you want me to do. Could you clarify?\n\nI understood: "${message.content}"`
+              `I'm not sure what you want me to do. Could you clarify?\n\nI understood: "${message.content}"`,
+              message.sessionId
             );
           } else {
             await this.messagingAdapter.sendMessage(
               `I didn't understand that. Try something like:\n` +
               `• "fix the login bug in my-project"\n` +
               `• "add dark mode to the frontend"\n` +
-              `• "refactor the auth module"`
+              `• "refactor the auth module"`,
+              message.sessionId
             );
           }
           break;
@@ -375,7 +386,8 @@ export class MiloAgent {
     } catch (error) {
       this.logger.error('Failed to process message:', error);
       await this.messagingAdapter.sendMessage(
-        `Sorry, I encountered an error processing your message: ${error}`
+        `Sorry, I encountered an error processing your message: ${error}`,
+        message.sessionId
       );
     }
   }
@@ -400,7 +412,8 @@ export class MiloAgent {
       this.logger.verbose('  Session limit reached, notifying user');
       await this.messagingAdapter.sendMessage(
         `Cannot start new session. You have ${activeSessions.length}/${maxSessions} active sessions.\n` +
-        `Active sessions: ${activeSessions.map((s) => s.name).join(', ')}`
+        `Active sessions: ${activeSessions.map((s) => s.name).join(', ')}`,
+        message.sessionId
       );
       return;
     }
@@ -425,7 +438,8 @@ export class MiloAgent {
     await this.messagingAdapter.sendMessage(
       `Starting session: ${sessionName}\n` +
       (intent.projectName ? `Project: ${intent.projectName}\n` : '') +
-      `Task: ${taskDescription}`
+      `Task: ${taskDescription}`,
+      message.sessionId
     );
 
     // Create and run task list
@@ -454,14 +468,16 @@ export class MiloAgent {
       this.logger.verbose(`  Session completed: ${result.completedTasks} tasks in ${(taskElapsed / 1000).toFixed(1)}s`);
       await this.messagingAdapter.sendMessage(
         `Session completed: ${sessionName}\n` +
-        `Completed: ${result.completedTasks} tasks`
+        `Completed: ${result.completedTasks} tasks`,
+        message.sessionId
       );
     } else {
       await this.sessionManager.updateSessionStatus(sessionName, 'FAILED');
       this.logger.verbose(`  Session failed after ${(taskElapsed / 1000).toFixed(1)}s: ${result.errors.map(e => e.error).join(', ')}`);
       await this.messagingAdapter.sendMessage(
         `Session failed: ${sessionName}\n` +
-        `Errors: ${result.errors.map((e) => e.error).join(', ')}`
+        `Errors: ${result.errors.map((e) => e.error).join(', ')}`,
+        message.sessionId
       );
     }
   }
@@ -479,7 +495,8 @@ export class MiloAgent {
     if (!sessionName) {
       this.logger.verbose('  No session name found, notifying user');
       await this.messagingAdapter.sendMessage(
-        'No active session to send message to. Start a new session first.'
+        'No active session to send message to. Start a new session first.',
+        message.sessionId
       );
       return;
     }
@@ -489,7 +506,8 @@ export class MiloAgent {
     if (!session) {
       this.logger.verbose(`  Session "${sessionName}" not found in session manager`);
       await this.messagingAdapter.sendMessage(
-        `Session "${sessionName}" not found.`
+        `Session "${sessionName}" not found.`,
+        message.sessionId
       );
       return;
     }
@@ -503,6 +521,77 @@ export class MiloAgent {
       `Message received for session: ${sessionName}`,
       message.sessionId
     );
+  }
+
+  /**
+   * Handle a message in a chat session (direct AI response, no Claude Code)
+   */
+  private async handleChatMessage(message: PendingMessage): Promise<void> {
+    this.logger.info(`Chat session message: ${message.sessionId}`);
+
+    // Fetch chat history for context
+    const history = await this.fetchSessionHistory(message.sessionId);
+
+    // Build conversation for the AI
+    const conversationMessages = history.map((m) => ({
+      role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
+      content: m.content,
+    }));
+
+    // Add the current message
+    conversationMessages.push({ role: 'user', content: message.content });
+
+    try {
+      const ai = getAIClient();
+      const model = getAIModel();
+
+      const response = await ai.messages.create({
+        model,
+        max_tokens: 4096,
+        system:
+          'You are MiloBot, a helpful coding assistant. The user is chatting with you for quick tasks like reading files, counting things, or answering questions. Be concise and helpful.',
+        messages: conversationMessages,
+      });
+
+      const textBlock = response.content.find((block) => block.type === 'text');
+      const responseText =
+        textBlock?.type === 'text' ? textBlock.text : 'No response generated.';
+
+      // Calculate context size
+      const inputTokens = response.usage.input_tokens;
+      const outputTokens = response.usage.output_tokens;
+      const usedTokens = inputTokens + outputTokens;
+      const maxTokens = 200000; // Claude model context limit
+
+      // Send response with context size
+      if (this.pubnubAdapter && this.pubnubAdapter.isConnected) {
+        await this.pubnubAdapter.sendMessageWithContext(responseText, message.sessionId, {
+          usedTokens,
+          maxTokens,
+        });
+      } else {
+        await this.messagingAdapter.sendMessage(responseText, message.sessionId);
+      }
+    } catch (error) {
+      this.logger.error('Chat AI response failed:', error);
+      await this.messagingAdapter.sendMessage(
+        'Sorry, I encountered an error generating a response.',
+        message.sessionId
+      );
+    }
+  }
+
+  /**
+   * Fetch message history for a session from the web API
+   */
+  private async fetchSessionHistory(
+    sessionId: string
+  ): Promise<Array<{ sender: string; content: string }>> {
+    try {
+      return await this.restAdapter.getSessionHistory(sessionId);
+    } catch {
+      return [];
+    }
   }
 
   /**
