@@ -2,7 +2,7 @@
  * API request and response types
  */
 
-import type { Agent, Message, Session, SessionStatus, SubscriptionTier } from './types';
+import type { Agent, Message, Session, SessionStatus, SessionType, SubscriptionTier } from './types';
 
 // ============================================================================
 // Common Response Types
@@ -42,8 +42,9 @@ export interface HeartbeatResponse {
 
 export interface PendingMessage {
   id: string;
-  sessionId: string | null;
+  sessionId: string;
   sessionName: string | null;
+  sessionType: SessionType;
   content: string;
   createdAt: string;
 }
@@ -61,7 +62,7 @@ export interface AckMessagesResponse {
 }
 
 export interface SendMessageRequest {
-  sessionId?: string | null;
+  sessionId: string;
   content: string;
 }
 
@@ -87,6 +88,7 @@ export interface ListMessagesResponse {
 
 export interface CreateSessionRequest {
   name: string;
+  type?: SessionType;
 }
 
 export interface CreateSessionResponse {
@@ -95,6 +97,7 @@ export interface CreateSessionResponse {
 
 export interface UpdateSessionRequest {
   status?: SessionStatus;
+  name?: string;
   completionMessage?: string;
 }
 
@@ -104,6 +107,7 @@ export interface UpdateSessionResponse {
 
 export interface ListSessionsParams {
   status?: SessionStatus | 'archived';
+  type?: SessionType;
   limit?: number;
 }
 

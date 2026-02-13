@@ -65,6 +65,8 @@ export interface AgentWithApiKey extends Agent {
 // Session Types
 // ============================================================================
 
+export type SessionType = 'chat' | 'bot';
+
 export type SessionStatus = 'active' | 'completed' | 'failed' | 'cancelled';
 
 export interface Session {
@@ -72,6 +74,7 @@ export interface Session {
   agentId: string;
   userId: string;
   name: string;
+  type: SessionType;
   status: SessionStatus;
   completionMessage?: string;
   createdAt: Date;
@@ -89,7 +92,7 @@ export interface Message {
   id: string;
   agentId: string;
   userId: string;
-  sessionId?: string;
+  sessionId: string;
   sender: MessageSender;
   content: string;
   ackedAt?: Date;
