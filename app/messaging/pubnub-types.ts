@@ -14,9 +14,27 @@ export interface PubNubCommandMessage {
   timestamp: string;
 }
 
-/** Agent -> User (published on evt channel) */
+/**
+ * Orchestrator → Browser (evt channel)
+ *
+ * Discriminated union by `type`. The browser uses `type` to route
+ * each event to the correct UI handler.
+ */
+export type PubNubEventType =
+  | 'agent_message'
+  | 'session_update'
+  | 'agent_status'
+  | 'message_received'
+  | 'session_status_changed'
+  | 'subagent_started'
+  | 'subagent_stopped'
+  | 'subagent_output'
+  | 'task_cancel_requested'
+  | 'task_cancelled'
+  | 'error';
+
 export interface PubNubEventMessage {
-  type: 'agent_message' | 'session_update' | 'agent_status';
+  type: PubNubEventType;
   messageId?: string;
   agentId: string;
   sessionId?: string;
@@ -28,6 +46,14 @@ export interface PubNubEventMessage {
     usedTokens: number;
     maxTokens: number;
   };
+  /** The event_id this receipt acknowledges (for message_received) */
+  receivedEventId?: string;
+  /** Whether the message was queued for processing */
+  queued?: boolean;
+  /** Error details for error events */
+  errorMessage?: string;
+  /** Worker PID for subagent lifecycle events */
+  workerPid?: number;
   timestamp: string;
 }
 
