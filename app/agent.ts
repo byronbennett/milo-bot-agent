@@ -154,6 +154,9 @@ export class MiloAgent {
           await this.pubnubAdapter.connect();
           this.logger.info('PubNub connected - real-time messaging enabled');
 
+          // Notify the user that the bot is online
+          await this.pubnubAdapter.publishAgentStatus('Bot is online');
+
           // With PubNub, reduce heartbeat to every 5 minutes (DB state only)
           this.scheduler.setInterval(5);
           this.logger.verbose('Heartbeat interval reduced to 5 min (PubNub handles messages)');
@@ -195,8 +198,9 @@ export class MiloAgent {
 
     this.logger.info('Stopping MiloBot agent...');
 
-    // Disconnect PubNub gracefully (triggers leave Presence event)
+    // Notify user and disconnect PubNub gracefully (triggers leave Presence event)
     if (this.pubnubAdapter) {
+      await this.pubnubAdapter.publishAgentStatus('Bot is signing off');
       await this.pubnubAdapter.disconnect();
       this.logger.info('PubNub disconnected');
     }

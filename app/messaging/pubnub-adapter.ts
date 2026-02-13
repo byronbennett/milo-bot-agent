@@ -18,6 +18,7 @@ export class PubNubAdapter implements MessagingAdapter {
   private onMessage: (message: PendingMessage) => Promise<void>;
   private logger: Logger;
 
+  private agentId: string = '';
   private cmdChannel: string = '';
   private evtChannel: string = '';
   private token: string = '';
@@ -66,6 +67,7 @@ export class PubNubAdapter implements MessagingAdapter {
 
     this.token = tokenData.token;
     this.tokenExpiresAt = new Date(tokenData.expiresAt);
+    this.agentId = tokenData.userId;
     this.cmdChannel = tokenData.channels.cmd;
     this.evtChannel = tokenData.channels.evt;
 
@@ -257,7 +259,7 @@ export class PubNubAdapter implements MessagingAdapter {
       try {
         const message: PubNubEventMessage = {
           type: 'agent_message',
-          agentId: '',
+          agentId: this.agentId,
           sessionId,
           content,
           timestamp: new Date().toISOString(),
@@ -318,7 +320,7 @@ export class PubNubAdapter implements MessagingAdapter {
     try {
       const message: PubNubEventMessage = {
         type: 'session_update',
-        agentId: '',
+        agentId: this.agentId,
         sessionId,
         sessionStatus: status,
         sessionName: sessionName || name,
@@ -332,6 +334,34 @@ export class PubNubAdapter implements MessagingAdapter {
       });
     } catch (err) {
       this.logger.warn('PubNub session update publish failed:', err);
+    }
+  }
+
+  /**
+   * Publish an agent status event (e.g. "Bot is online") via PubNub only
+   */
+  async publishAgentStatus(content: string): Promise<void> {
+    if (!this.pubnub || !this.isConnected) {
+      this.logger.warn(`Cannot publish agent status "${content}" (pubnub: ${!!this.pubnub}, connected: ${this.isConnected})`);
+      return;
+    }
+
+    this.logger.verbose(`Publishing agent status "${content}" to ${this.evtChannel}...`);
+    try {
+      const message: PubNubEventMessage = {
+        type: 'agent_status',
+        agentId: this.agentId,
+        content,
+        timestamp: new Date().toISOString(),
+      };
+
+      const result = await this.pubnub.publish({
+        channel: this.evtChannel,
+        message: message as unknown as PubNub.Payload,
+      });
+      this.logger.info(`Published agent status: "${content}" (timetoken: ${result.timetoken})`);
+    } catch (err) {
+      this.logger.warn('PubNub agent status publish failed:', err);
     }
   }
 
@@ -353,7 +383,7 @@ export class PubNubAdapter implements MessagingAdapter {
       try {
         const message: PubNubEventMessage = {
           type: 'agent_message',
-          agentId: '',
+          agentId: this.agentId,
           sessionId,
           content,
           contextSize,
