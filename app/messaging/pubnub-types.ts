@@ -10,7 +10,9 @@ export interface PubNubCommandMessage {
   agentId: string;
   sessionId: string;
   sessionType: 'chat' | 'bot';
+  sessionName?: string;
   content: string;
+  uiAction?: string;
   timestamp: string;
 }
 
@@ -46,8 +48,8 @@ export interface PubNubEventMessage {
     usedTokens: number;
     maxTokens: number;
   };
-  /** The event_id this receipt acknowledges (for message_received) */
-  receivedEventId?: string;
+  /** The message_id this receipt acknowledges (for message_received) */
+  receivedMessageId?: string;
   /** Whether the message was queued for processing */
   queued?: boolean;
   /** Error details for error events */

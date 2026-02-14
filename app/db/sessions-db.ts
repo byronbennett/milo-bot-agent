@@ -56,10 +56,10 @@ export function getActiveSessions(db: Database.Database): SessionRecord[] {
   return db.prepare(`SELECT * FROM sessions WHERE status LIKE 'OPEN_%' ORDER BY updated_at DESC`).all() as SessionRecord[];
 }
 
-export function insertSessionMessage(db: Database.Database, sessionId: string, sender: string, content: string, eventId?: string): void {
+export function insertSessionMessage(db: Database.Database, sessionId: string, sender: string, content: string, messageId?: string): void {
   db.prepare(`
-    INSERT INTO session_messages (session_id, sender, content, event_id) VALUES (?, ?, ?, ?)
-  `).run(sessionId, sender, content, eventId ?? null);
+    INSERT INTO session_messages (session_id, sender, content, message_id) VALUES (?, ?, ?, ?)
+  `).run(sessionId, sender, content, messageId ?? null);
 }
 
 export function getSessionMessages(db: Database.Database, sessionId: string, limit = 50): Array<{ sender: string; content: string; created_at: string }> {

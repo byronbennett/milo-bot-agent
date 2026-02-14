@@ -46,6 +46,7 @@ export interface PendingMessage {
   sessionName: string | null;
   sessionType: SessionType;
   content: string;
+  uiAction?: string;
   createdAt: string;
 }
 

@@ -148,9 +148,10 @@ export class PubNubAdapter implements MessagingAdapter {
     const pending: PendingMessage = {
       id: msg.messageId,
       sessionId: msg.sessionId,
-      sessionName: null,
+      sessionName: msg.sessionName ?? null,
       sessionType: msg.sessionType || 'bot',
       content: msg.content,
+      uiAction: msg.uiAction,
       createdAt: msg.timestamp,
     };
 

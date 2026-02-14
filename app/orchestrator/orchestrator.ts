@@ -22,12 +22,13 @@ import { enqueueOutbox, getUnsent, markSent, markFailed } from '../db/outbox.js'
 import {
   upsertSession,
   updateSessionStatus,
+  updateWorkerState,
   getActiveSessions,
   insertSessionMessage,
 } from '../db/sessions-db.js';
 import { SessionActorManager } from './session-actor.js';
 import type { WorkerToOrchestrator } from './ipc-types.js';
-import type { WorkItem, WorkItemType } from './session-types.js';
+import type { WorkItem, WorkItemType, WorkerState } from './session-types.js';
 import { HeartbeatScheduler } from '../scheduler/heartbeat.js';
 import { Logger, logger } from '../utils/logger.js';
 import type Database from 'better-sqlite3';
@@ -53,6 +54,8 @@ export class Orchestrator {
   private outboxTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
   private shuttingDown = false;
+  private orphanMonitors = new Map<string, NodeJS.Timeout>();
+  private orphanedSessionIds = new Set<string>();
 
   constructor(options: OrchestratorOptions) {
     this.config = options.config;
@@ -87,6 +90,9 @@ export class Orchestrator {
     this.db = getDb(this.config.workspace.baseDir);
     this.logger.verbose('SQLite database opened');
 
+    // 1b. Recover orphaned sessions from prior crash
+    this.recoverOrphanedSessions();
+
     // 2. Create session actor manager
     const workerScript = join(__dirname, 'worker.js');
     this.actorManager = new SessionActorManager({
@@ -96,6 +102,9 @@ export class Orchestrator {
       aiModel: this.config.ai.model,
       logger: this.logger,
       onWorkerEvent: this.handleWorkerEvent.bind(this),
+      onWorkerStateChange: (sessionId: string, pid: number | null, state: WorkerState) => {
+        updateWorkerState(this.db, sessionId, pid, state);
+      },
     });
 
     // 3. Verify connection
@@ -152,6 +161,19 @@ export class Orchestrator {
 
     if (this.outboxTimer) clearInterval(this.outboxTimer);
 
+    // Clean up orphan monitors
+    for (const timer of this.orphanMonitors.values()) {
+      clearInterval(timer);
+    }
+    this.orphanMonitors.clear();
+    this.orphanedSessionIds.clear();
+
+    // Audit log shutdown for active sessions
+    const activeSessions = getActiveSessions(this.db);
+    for (const session of activeSessions) {
+      insertSessionMessage(this.db, session.session_id, 'system', 'Orchestrator shutting down');
+    }
+
     await this.actorManager.shutdownAll();
 
     // Final outbox flush
@@ -175,15 +197,16 @@ export class Orchestrator {
 
     // 1. Dedup + persist to inbox
     const isNew = insertInbox(this.db, {
-      event_id: message.id,
+      message_id: message.id,
       session_id: message.sessionId,
       session_type: message.sessionType || 'bot',
       content: message.content,
       session_name: message.sessionName ?? undefined,
+      ui_action: message.uiAction ?? undefined,
     });
 
     if (!isNew) {
-      this.logger.verbose(`Duplicate event ${message.id}, skipping`);
+      this.logger.verbose(`Duplicate message ${message.id}, skipping`);
       return;
     }
 
@@ -214,7 +237,7 @@ export class Orchestrator {
       for (const msg of pending) {
         // Dedup via inbox
         const isNew = insertInbox(this.db, {
-          event_id: msg.id,
+          message_id: msg.id,
           session_id: msg.sessionId,
           session_type: msg.sessionType || 'bot',
           content: msg.content,
@@ -241,7 +264,7 @@ export class Orchestrator {
     this.logger.info(`Draining ${items.length} unprocessed inbox items`);
     for (const item of items) {
       const msg: PendingMessage = {
-        id: item.event_id,
+        id: item.message_id,
         sessionId: item.session_id,
         sessionName: item.session_name ?? null,
         sessionType: (item.session_type as 'chat' | 'bot') || 'bot',
@@ -249,7 +272,7 @@ export class Orchestrator {
         createdAt: item.received_at,
       };
       // Fire-and-forget since these are recovery items
-      this.routeMessage(msg).then(() => markProcessed(this.db, item.event_id));
+      this.routeMessage(msg).then(() => markProcessed(this.db, item.message_id));
     }
   }
 
@@ -260,6 +283,12 @@ export class Orchestrator {
    * Derives intent (UI action or plain-text parsing) and enqueues a work item.
    */
   private async routeMessage(message: PendingMessage): Promise<void> {
+    // Skip routing if session is orphaned (message stays unprocessed, will be drained when orphan exits)
+    if (this.orphanedSessionIds.has(message.sessionId)) {
+      this.logger.verbose(`Session ${message.sessionId} is orphaned, deferring message`);
+      return;
+    }
+
     // Store in session messages table
     insertSessionMessage(this.db, message.sessionId, 'user', message.content, message.id);
 
@@ -329,6 +358,11 @@ export class Orchestrator {
           insertSessionMessage(this.db, sessionId, 'agent', event.output);
         }
 
+        // Audit log task failures
+        if (!event.success) {
+          insertSessionMessage(this.db, sessionId, 'system', `Task failed: ${event.error ?? 'Unknown error'}`);
+        }
+
         // Publish to user
         const content = event.success
           ? event.output ?? 'Task completed.'
@@ -354,6 +388,7 @@ export class Orchestrator {
       case 'WORKER_ERROR':
         this.publishEvent(sessionId, `Error: ${event.error}`);
         if (event.fatal) {
+          insertSessionMessage(this.db, sessionId, 'system', `Worker error (fatal): ${event.error}`);
           updateSessionStatus(this.db, sessionId, 'ERRORED');
         }
         break;
@@ -433,7 +468,7 @@ export class Orchestrator {
         const pending = await this.restAdapter.getPendingMessages();
         for (const msg of pending) {
           const isNew = insertInbox(this.db, {
-            event_id: msg.id,
+            message_id: msg.id,
             session_id: msg.sessionId,
             session_type: msg.sessionType || 'bot',
             content: msg.content,
@@ -451,6 +486,93 @@ export class Orchestrator {
     } catch (err) {
       this.logger.error('Heartbeat failed:', err);
     }
+  }
+
+  // --- Orphan Recovery ---
+
+  /**
+   * On startup, detect sessions left in an active state by a prior crash.
+   * For each, check if the worker PID is still alive:
+   * - Alive → mark as orphaned, poll until it exits
+   * - Dead/null → mark session CLOSED
+   */
+  private recoverOrphanedSessions(): void {
+    const sessions = getActiveSessions(this.db);
+    if (sessions.length === 0) return;
+
+    this.logger.info(`Recovering ${sessions.length} active session(s) from prior run`);
+
+    for (const session of sessions) {
+      const pid = session.worker_pid ?? null;
+
+      if (pid && this.isProcessAlive(pid)) {
+        this.logger.warn(`Session ${session.session_id}: worker PID ${pid} still alive (orphaned)`);
+        this.orphanedSessionIds.add(session.session_id);
+        this.monitorOrphanedPid(session.session_id, pid);
+        insertSessionMessage(
+          this.db,
+          session.session_id,
+          'system',
+          `Orchestrator restarted. Orphaned worker PID ${pid} detected — monitoring until exit.`,
+        );
+      } else {
+        this.logger.info(`Session ${session.session_id}: worker PID ${pid ?? 'none'} is dead, closing session`);
+        updateSessionStatus(this.db, session.session_id, 'CLOSED');
+        updateWorkerState(this.db, session.session_id, null, 'dead');
+        insertSessionMessage(
+          this.db,
+          session.session_id,
+          'system',
+          `Orchestrator restarted. Prior worker ${pid ? `PID ${pid}` : '(no PID)'} is dead — session closed.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Check if a process is still alive via kill(pid, 0).
+   */
+  private isProcessAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err: unknown) {
+      // EPERM means the process exists but we lack permission (still alive)
+      if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'EPERM') {
+        return true;
+      }
+      // ESRCH means no such process
+      return false;
+    }
+  }
+
+  /**
+   * Poll an orphaned worker PID every 10s. When it exits,
+   * close the session and drain the inbox to reprocess queued messages.
+   */
+  private monitorOrphanedPid(sessionId: string, pid: number): void {
+    const timer = setInterval(() => {
+      if (!this.isProcessAlive(pid)) {
+        this.logger.info(`Orphaned worker PID ${pid} for session ${sessionId} has exited`);
+        clearInterval(timer);
+        this.orphanMonitors.delete(sessionId);
+        this.orphanedSessionIds.delete(sessionId);
+
+        updateSessionStatus(this.db, sessionId, 'CLOSED');
+        updateWorkerState(this.db, sessionId, null, 'dead');
+        insertSessionMessage(
+          this.db,
+          sessionId,
+          'system',
+          `Orphaned worker PID ${pid} exited. Session closed.`,
+        );
+
+        // Reprocess any messages that were deferred while orphaned
+        this.drainInbox();
+      }
+    }, 10_000);
+
+    this.orphanMonitors.set(sessionId, timer);
   }
 
   // --- Shutdown ---

@@ -11,6 +11,10 @@
  *   3. Receive WORKER_CANCEL → abort current task → send WORKER_TASK_CANCELLED
  *   4. Receive WORKER_CLOSE → cleanup → exit(0)
  *
+ * Orphan handling:
+ *   If stdin closes (orchestrator dies), the worker checks whether a sub-agent
+ *   is running. If so, it waits up to 30 minutes for it to finish before exiting.
+ *
  * Usage: node --import tsx/esm app/orchestrator/worker.ts
  */
 
@@ -21,17 +25,20 @@ import type {
   WorkerCancelMessage,
   WorkerToOrchestrator,
 } from './ipc-types.js';
+import { sendNotification } from '../utils/notify.js';
+
+const ORPHAN_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 // Worker state
 let sessionId = '';
 let sessionName = '';
 let sessionType: 'chat' | 'bot' = 'bot';
 let projectPath = '';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let workspaceDir = '';
 let initialized = false;
 let currentTaskId: string | null = null;
 let cancelRequested = false;
+let orphanHandled = false;
 
 // Claude Code session (lazy, kept alive across tasks)
 let claudeSession: unknown = null;
@@ -164,10 +171,85 @@ async function executeClaudeCodeTask(msg: WorkerTaskMessage): Promise<string> {
   return response.result ?? 'No output from Claude Code.';
 }
 
+// --- Orphan handling ---
+
+/**
+ * Write an audit log entry directly to the worker's own DB connection.
+ * Safe to use when orchestrator is dead — WAL mode handles concurrent access.
+ */
+async function writeOrphanAuditLog(content: string): Promise<void> {
+  if (!workspaceDir || !sessionId) return;
+
+  try {
+    const { getDb } = await import('../db/index.js');
+    const { insertSessionMessage } = await import('../db/sessions-db.js');
+    const db = getDb(workspaceDir);
+    insertSessionMessage(db, sessionId, 'system', content);
+  } catch (err) {
+    log(`Failed to write orphan audit log: ${err}`);
+  }
+}
+
+/**
+ * Handle the orphan state when orchestrator connection is lost (stdin EOF).
+ * If a sub-agent is running, wait up to 30 minutes for it to finish.
+ */
+async function handleOrphanState(): Promise<void> {
+  if (orphanHandled) return;
+  orphanHandled = true;
+
+  log('Orchestrator connection lost (stdin EOF). Entering orphan state.');
+
+  await writeOrphanAuditLog('Orchestrator connection lost. Worker entering orphan state.');
+  sendNotification(
+    'MiloBot Worker Orphaned',
+    `Session "${sessionName || sessionId}" lost orchestrator connection.`,
+  );
+
+  if (!currentTaskId && !claudeSession) {
+    log('No sub-agent running. Exiting.');
+    await writeOrphanAuditLog('No sub-agent running. Exiting.');
+    process.exit(1);
+    return;
+  }
+
+  log(`Sub-agent running (task: ${currentTaskId}). Waiting up to 30 minutes for completion.`);
+  await writeOrphanAuditLog(`Sub-agent running (task: ${currentTaskId}). Waiting up to 30 minutes for completion.`);
+
+  const deadline = Date.now() + ORPHAN_TIMEOUT_MS;
+
+  const poll = setInterval(async () => {
+    if (!currentTaskId && !claudeSession) {
+      clearInterval(poll);
+      log('Sub-agent completed. Exiting orphaned worker.');
+      await writeOrphanAuditLog('Sub-agent completed. Exiting orphaned worker.');
+      process.exit(0);
+    }
+    if (Date.now() > deadline) {
+      clearInterval(poll);
+      log('Orphan timeout reached (30 min). Force exiting.');
+      await writeOrphanAuditLog('Orphan timeout reached (30 min). Force exiting.');
+      process.exit(1);
+    }
+  }, 5000);
+}
+
+/**
+ * Monitor stdin for EOF independently of the message loop.
+ * This fires when the orchestrator process dies or closes the pipe.
+ */
+function monitorStdinEOF(): void {
+  process.stdin.on('end', () => {
+    handleOrphanState();
+  });
+}
+
 // --- Main loop ---
 
 async function main(): Promise<void> {
   log('Worker process starting...');
+
+  monitorStdinEOF();
 
   for await (const msg of readIPC(process.stdin)) {
     switch (msg.type) {
@@ -189,9 +271,9 @@ async function main(): Promise<void> {
     }
   }
 
-  // stdin closed — orchestrator died or closed pipe
-  log('stdin closed, exiting...');
-  process.exit(1);
+  // stdin closed — let the orphan handler decide what to do
+  // (monitorStdinEOF will have already fired or will fire shortly)
+  await handleOrphanState();
 }
 
 main().catch((err) => {

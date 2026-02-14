@@ -16,7 +16,7 @@ describe('inbox', () => {
 
   test('insertInbox returns true for new event', () => {
     const result = insertInbox(db, {
-      event_id: 'evt-1',
+      message_id: 'evt-1',
       session_id: 'sess-1',
       session_type: 'bot',
       content: 'hello',
@@ -24,15 +24,15 @@ describe('inbox', () => {
     expect(result).toBe(true);
   });
 
-  test('insertInbox returns false for duplicate event_id', () => {
+  test('insertInbox returns false for duplicate message_id', () => {
     insertInbox(db, {
-      event_id: 'evt-1',
+      message_id: 'evt-1',
       session_id: 'sess-1',
       session_type: 'bot',
       content: 'hello',
     });
     const result = insertInbox(db, {
-      event_id: 'evt-1',
+      message_id: 'evt-1',
       session_id: 'sess-1',
       session_type: 'bot',
       content: 'hello again',
@@ -41,18 +41,18 @@ describe('inbox', () => {
   });
 
   test('getUnprocessed returns only unprocessed items', () => {
-    insertInbox(db, { event_id: 'evt-1', session_id: 's1', session_type: 'bot', content: 'a' });
-    insertInbox(db, { event_id: 'evt-2', session_id: 's1', session_type: 'bot', content: 'b' });
+    insertInbox(db, { message_id: 'evt-1', session_id: 's1', session_type: 'bot', content: 'a' });
+    insertInbox(db, { message_id: 'evt-2', session_id: 's1', session_type: 'bot', content: 'b' });
     markProcessed(db, 'evt-1');
 
     const unprocessed = getUnprocessed(db);
     expect(unprocessed).toHaveLength(1);
-    expect(unprocessed[0].event_id).toBe('evt-2');
+    expect(unprocessed[0].message_id).toBe('evt-2');
   });
 
   test('getUnprocessed respects limit', () => {
     for (let i = 0; i < 10; i++) {
-      insertInbox(db, { event_id: `evt-${i}`, session_id: 's1', session_type: 'bot', content: `msg-${i}` });
+      insertInbox(db, { message_id: `evt-${i}`, session_id: 's1', session_type: 'bot', content: `msg-${i}` });
     }
 
     const result = getUnprocessed(db, 3);

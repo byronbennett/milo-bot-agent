@@ -21,6 +21,7 @@ import type {
 import type {
   SessionActor,
   WorkItem,
+  WorkerState,
 } from './session-types.js';
 import { Logger } from '../utils/logger.js';
 
@@ -31,6 +32,7 @@ export interface SessionActorManagerOptions {
   aiModel?: string;
   logger: Logger;
   onWorkerEvent: (sessionId: string, event: WorkerToOrchestrator) => void;
+  onWorkerStateChange?: (sessionId: string, pid: number | null, state: WorkerState) => void;
 }
 
 export class SessionActorManager {
@@ -200,6 +202,16 @@ export class SessionActorManager {
 
   // --- Private helpers ---
 
+  private setWorkerState(actor: SessionActor, state: WorkerState): void {
+    if (!actor.worker) return;
+    actor.worker.state = state;
+    this.options.onWorkerStateChange?.(
+      actor.sessionId,
+      state === 'dead' ? null : actor.worker.pid,
+      state,
+    );
+  }
+
   private async spawnWorker(actor: SessionActor): Promise<void> {
     this.logger.info(`Spawning worker for session ${actor.sessionId}`);
 
@@ -216,10 +228,11 @@ export class SessionActorManager {
 
     actor.worker = {
       pid: workerPid,
-      state: 'starting',
+      state: 'starting', // set directly here since setWorkerState needs worker to exist
       sessionId: actor.sessionId,
       process: child,
     };
+    this.options.onWorkerStateChange?.(actor.sessionId, workerPid, 'starting');
 
     // Pipe stderr to our logger
     child.stderr?.on('data', (data: Buffer) => {
@@ -297,26 +310,26 @@ export class SessionActorManager {
 
     switch (msg.type) {
       case 'WORKER_READY':
-        if (actor.worker) actor.worker.state = 'ready';
+        this.setWorkerState(actor, 'ready');
         actor.status = 'OPEN_IDLE';
         this.tryDispatch(actor);
         break;
 
       case 'WORKER_TASK_STARTED':
-        if (actor.worker) actor.worker.state = 'busy';
+        this.setWorkerState(actor, 'busy');
         actor.status = 'OPEN_RUNNING';
         break;
 
       case 'WORKER_TASK_DONE':
         actor.currentTask = null;
-        if (actor.worker) actor.worker.state = 'ready';
+        this.setWorkerState(actor, 'ready');
         actor.status = 'OPEN_IDLE';
         // tryDispatch will be called when WORKER_READY follows
         break;
 
       case 'WORKER_TASK_CANCELLED':
         actor.currentTask = null;
-        if (actor.worker) actor.worker.state = 'ready';
+        this.setWorkerState(actor, 'ready');
         actor.status = 'OPEN_IDLE';
         break;
 
@@ -395,9 +408,7 @@ export class SessionActorManager {
   }
 
   private markWorkerDead(actor: SessionActor): void {
-    if (actor.worker) {
-      actor.worker.state = 'dead';
-    }
+    this.setWorkerState(actor, 'dead');
     if (actor.currentTask) {
       actor.currentTask = null;
     }

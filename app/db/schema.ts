@@ -2,7 +2,7 @@
  * SQLite schema for the orchestrator's durable inbox/outbox and session state.
  *
  * Tables:
- * - inbox: inbound messages from PubNub/REST, deduped by event_id
+ * - inbox: inbound messages from PubNub/REST, deduped by message_id
  * - outbox: outbound events to persist via REST (retry queue)
  * - sessions: active session state (replaces markdown files)
  * - session_messages: per-session message log for context
@@ -10,10 +10,7 @@
 
 export const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS inbox (
-    event_id    TEXT PRIMARY KEY,
-    tenant_id   TEXT,
-    user_id     TEXT,
-    agent_host_id TEXT,
+    message_id  TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL,
     session_name TEXT,
     session_type TEXT NOT NULL DEFAULT 'bot',
@@ -63,7 +60,7 @@ export const SCHEMA_SQL = `
     session_id  TEXT NOT NULL,
     sender      TEXT NOT NULL,
     content     TEXT NOT NULL,
-    event_id    TEXT,
+    message_id  TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
   );
