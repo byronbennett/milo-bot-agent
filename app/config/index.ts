@@ -4,7 +4,7 @@ import { homedir } from 'os';
 import { agentConfigSchema, type AgentConfig } from './schema';
 import { defaultConfig, getDefaultConfigPath } from './defaults';
 import { loadApiKey, loadAnthropicKey } from '../utils/keychain';
-import { setAIModel } from '../utils/ai-client';
+import { initUtilityModel } from '../utils/ai-client';
 
 export type { AgentConfig } from './schema';
 export { defaultConfig, getDefaultConfigPath } from './defaults';
@@ -100,8 +100,8 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
       }
     }
 
-    // Configure the AI model from config
-    setAIModel(config.ai.model);
+    // Configure the utility AI model from config
+    initUtilityModel(config.ai.utility.provider, config.ai.utility.model);
 
     return config;
   } catch (error) {

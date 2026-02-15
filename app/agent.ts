@@ -20,7 +20,7 @@ import { SessionManager } from './session/manager';
 import { HeartbeatScheduler } from './scheduler/heartbeat';
 import { Logger, logger } from './utils/logger';
 import { parseIntentWithAI, describeIntent, isConfident } from './intent';
-import { isAIAvailable, getAIClient, getAIModel, complete } from './utils/ai-client';
+import { isAIAvailable, complete } from './utils/ai-client';
 import { enhancePrompt } from './prompt';
 import { runTasks, createStandardTaskList } from './task';
 import { shouldAutoAnswer } from './auto-answer';
@@ -587,32 +587,22 @@ Respond with ONLY the name, nothing else.`,
     conversationMessages.push({ role: 'user', content: message.content });
 
     try {
-      const ai = getAIClient();
-      const model = getAIModel();
+      // Flatten conversation into a single prompt for the utility model
+      const conversationText = conversationMessages
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n\n');
 
-      const response = await ai.messages.create({
-        model,
-        max_tokens: 4096,
+      const responseText = await complete(conversationText, {
         system:
           'You are MiloBot, a helpful coding assistant. The user is chatting with you for quick tasks like reading files, counting things, or answering questions. Be concise and helpful.',
-        messages: conversationMessages,
+        maxTokens: 4096,
       });
 
-      const textBlock = response.content.find((block) => block.type === 'text');
-      const responseText =
-        textBlock?.type === 'text' ? textBlock.text : 'No response generated.';
-
-      // Calculate context size
-      const inputTokens = response.usage.input_tokens;
-      const outputTokens = response.usage.output_tokens;
-      const usedTokens = inputTokens + outputTokens;
-      const maxTokens = 200000; // Claude model context limit
-
-      // Send response with context size
+      // Send response
       if (this.pubnubAdapter && this.pubnubAdapter.isConnected) {
         await this.pubnubAdapter.sendMessageWithContext(responseText, message.sessionId, {
-          usedTokens,
-          maxTokens,
+          usedTokens: 0,
+          maxTokens: 200000,
         });
       } else {
         await this.messagingAdapter.sendMessage(responseText, message.sessionId);
