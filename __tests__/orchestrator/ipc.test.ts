@@ -57,6 +57,50 @@ describe('IPC helpers', () => {
     expect(messages[0].type).toBe('WORKER_READY');
   });
 
+  test('WORKER_STREAM_TEXT can be sent and received', async () => {
+    const stream = new PassThrough();
+
+    const msg: IPCMessage = {
+      type: 'WORKER_STREAM_TEXT',
+      sessionId: 's1',
+      taskId: 't1',
+      delta: 'Hello, world!',
+    };
+
+    sendIPC(stream, msg);
+    stream.end();
+
+    const messages: IPCMessage[] = [];
+    for await (const m of readIPC(stream)) {
+      messages.push(m);
+    }
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual(msg);
+    expect(messages[0].type).toBe('WORKER_STREAM_TEXT');
+  });
+
+  test('WORKER_STEER can be sent and received', async () => {
+    const stream = new PassThrough();
+
+    const msg: IPCMessage = {
+      type: 'WORKER_STEER',
+      prompt: 'Focus on the login module instead',
+    };
+
+    sendIPC(stream, msg);
+    stream.end();
+
+    const messages: IPCMessage[] = [];
+    for await (const m of readIPC(stream)) {
+      messages.push(m);
+    }
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual(msg);
+    expect(messages[0].type).toBe('WORKER_STEER');
+  });
+
   test('readIPC handles chunked data across line boundaries', async () => {
     const stream = new PassThrough();
     const msg: IPCMessage = { type: 'WORKER_READY', sessionId: 's1', pid: 1 };

@@ -12,9 +12,13 @@ export interface WorkerInitMessage {
   sessionType: 'chat' | 'bot';
   projectPath: string;
   workspaceDir: string;
+  botIdentity?: string;
   config: {
-    aiModel: string;
-    anthropicApiKey?: string;
+    agentProvider?: string;
+    agentModel?: string;
+    utilityProvider?: string;
+    utilityModel?: string;
+    toolSet?: string;
   };
 }
 
@@ -41,11 +45,24 @@ export interface WorkerCloseMessage {
   reason?: string;
 }
 
+export interface WorkerSteerMessage {
+  type: 'WORKER_STEER';
+  prompt: string;
+}
+
+export interface WorkerAnswerMessage {
+  type: 'WORKER_ANSWER';
+  toolCallId: string;
+  answer: string;
+}
+
 export type OrchestratorToWorker =
   | WorkerInitMessage
   | WorkerTaskMessage
   | WorkerCancelMessage
-  | WorkerCloseMessage;
+  | WorkerCloseMessage
+  | WorkerSteerMessage
+  | WorkerAnswerMessage;
 
 // --- Worker → Orchestrator ---
 
@@ -92,13 +109,51 @@ export interface WorkerProgressMessage {
   message: string;
 }
 
+export interface WorkerStreamTextMessage {
+  type: 'WORKER_STREAM_TEXT';
+  sessionId: string;
+  taskId: string;
+  delta: string;
+}
+
+export interface WorkerToolStartMessage {
+  type: 'WORKER_TOOL_START';
+  sessionId: string;
+  taskId: string;
+  toolName: string;
+  toolCallId: string;
+}
+
+export interface WorkerToolEndMessage {
+  type: 'WORKER_TOOL_END';
+  sessionId: string;
+  taskId: string;
+  toolName: string;
+  toolCallId: string;
+  success: boolean;
+  summary?: string;
+}
+
+export interface WorkerQuestionMessage {
+  type: 'WORKER_QUESTION';
+  sessionId: string;
+  taskId: string;
+  toolCallId: string;
+  question: string;
+  options?: string[];
+}
+
 export type WorkerToOrchestrator =
   | WorkerReadyMessage
   | WorkerTaskStartedMessage
   | WorkerTaskDoneMessage
   | WorkerTaskCancelledMessage
   | WorkerErrorMessage
-  | WorkerProgressMessage;
+  | WorkerProgressMessage
+  | WorkerStreamTextMessage
+  | WorkerToolStartMessage
+  | WorkerToolEndMessage
+  | WorkerQuestionMessage;
 
 // Union of all IPC messages
 export type IPCMessage = OrchestratorToWorker | WorkerToOrchestrator;
