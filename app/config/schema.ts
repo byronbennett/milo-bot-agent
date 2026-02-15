@@ -43,8 +43,21 @@ export const telegramMessagingConfigSchema = z.object({
   chatId: z.string().optional(),
 });
 
+const aiModelConfigSchema = z.object({
+  provider: z.string().default('anthropic'),
+  model: z.string(),
+});
+
 export const aiConfigSchema = z.object({
   model: z.string().default('claude-sonnet-4-5'),
+  agent: aiModelConfigSchema.default({
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-20250514',
+  }),
+  utility: aiModelConfigSchema.default({
+    provider: 'anthropic',
+    model: 'claude-haiku-4-5-20251001',
+  }),
 });
 
 export const messagingConfigSchema = z.object({
