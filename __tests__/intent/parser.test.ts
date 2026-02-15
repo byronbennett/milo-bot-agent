@@ -41,12 +41,12 @@ describe('Intent Parser', () => {
       expect(result.type).toBe('greeting');
     });
 
-    it('extracts @bot-identity from messages', () => {
+    it('does not parse @mentions (persona comes from message fields, not content)', () => {
       const message = createMessage('@coder fix the login bug');
       const result = parseIntent(message, mockConfig);
-      expect(result.botIdentity).toBe('coder');
-      expect(result.type).toBe('open_session');
-      expect(result.taskDescription).toContain('login bug');
+      // @coder is not a task verb, so this falls through to unknown
+      // The web app sends persona separately in the message payload
+      expect(result.type).toBe('unknown');
     });
 
     it('extracts task description from open session intent', () => {

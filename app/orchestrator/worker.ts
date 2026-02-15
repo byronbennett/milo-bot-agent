@@ -38,7 +38,7 @@ let agent: import('@mariozechner/pi-agent-core').Agent | null = null;
 const pendingAnswers = new Map<string, (answer: string) => void>();
 
 // Store init config for lazy agent creation
-let initBotIdentity: string | undefined;
+let initPersona: string | undefined;
 let initConfig: WorkerInitMessage['config'] = {};
 
 function send(msg: WorkerToOrchestrator): void {
@@ -54,7 +54,7 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   sessionName = msg.sessionName;
   projectPath = msg.projectPath;
   workspaceDir = msg.workspaceDir;
-  initBotIdentity = msg.botIdentity;
+  initPersona = msg.persona;
   initConfig = msg.config;
 
   initialized = true;
@@ -73,7 +73,7 @@ async function createAgent(msg: WorkerInitMessage): Promise<void> {
 
   // Load bot-identity
   const agentsDir = join(workspaceDir, 'agents');
-  const identityName = msg.botIdentity ?? 'default';
+  const identityName = msg.persona ?? 'default';
   const identity = loadBotIdentity(agentsDir, identityName);
 
   // Build system prompt
@@ -216,7 +216,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
         sessionType: 'bot',
         projectPath,
         workspaceDir,
-        botIdentity: initBotIdentity,
+        persona: initPersona,
         config: initConfig,
       });
     }

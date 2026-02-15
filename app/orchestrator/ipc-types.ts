@@ -12,7 +12,7 @@ export interface WorkerInitMessage {
   sessionType: 'chat' | 'bot';
   projectPath: string;
   workspaceDir: string;
-  botIdentity?: string;
+  persona?: string;
   config: {
     agentProvider?: string;
     agentModel?: string;

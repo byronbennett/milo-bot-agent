@@ -213,7 +213,6 @@ export interface ParsedIntent {
   taskDescription?: string;
   answer?: string;
   rule?: string;
-  botIdentity?: string;
   confidence: number;
   raw: string;
 }

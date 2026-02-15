@@ -13,6 +13,8 @@ export interface PubNubCommandMessage {
   sessionName?: string;
   content: string;
   uiAction?: string;
+  persona?: string;
+  model?: string;
   timestamp: string;
 }
 

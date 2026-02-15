@@ -54,7 +54,8 @@ export class SessionActorManager {
     sessionName: string;
     sessionType: 'chat' | 'bot';
     projectPath: string;
-    botIdentity?: string;
+    persona?: string;
+    model?: string;
   }): Promise<SessionActor> {
     let actor = this.actors.get(sessionId);
 
@@ -69,7 +70,8 @@ export class SessionActorManager {
         queueHigh: [],
         queueNormal: [],
         projectPath: meta.projectPath,
-        botIdentity: meta.botIdentity,
+        persona: meta.persona,
+        model: meta.model,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -287,10 +289,10 @@ export class SessionActorManager {
       sessionType: actor.sessionType,
       projectPath: actor.projectPath,
       workspaceDir: this.options.workspaceDir,
-      botIdentity: actor.botIdentity,
+      persona: actor.persona,
       config: {
         agentProvider: this.options.agentProvider,
-        agentModel: this.options.agentModel,
+        agentModel: actor.model ?? this.options.agentModel,
         utilityProvider: this.options.utilityProvider,
         utilityModel: this.options.utilityModel,
       },

@@ -152,6 +152,8 @@ export class PubNubAdapter implements MessagingAdapter {
       sessionType: msg.sessionType || 'bot',
       content: msg.content,
       uiAction: msg.uiAction,
+      persona: msg.persona,
+      model: msg.model,
       createdAt: msg.timestamp,
     };
 
