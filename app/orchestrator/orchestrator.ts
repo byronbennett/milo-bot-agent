@@ -94,7 +94,7 @@ export class Orchestrator {
     this.recoverOrphanedSessions();
 
     // 2. Create session actor manager
-    const workerScript = join(__dirname, 'worker.js');
+    const workerScript = join(__dirname, '..', 'orchestrator', 'worker.js');
     this.actorManager = new SessionActorManager({
       workspaceDir: this.config.workspace.baseDir,
       workerScript,
@@ -124,6 +124,7 @@ export class Orchestrator {
           onMessage: this.handlePubNubMessage.bind(this),
           logger: this.logger,
         });
+        this.pubnubAdapter.pubsubOnly = true; // Orchestrator manages REST persistence via outbox
         await this.pubnubAdapter.connect();
         await this.pubnubAdapter.publishAgentStatus('Bot is online');
         this.scheduler.setInterval(5);
@@ -289,19 +290,19 @@ export class Orchestrator {
       return;
     }
 
-    // Store in session messages table
-    insertSessionMessage(this.db, message.sessionId, 'user', message.content, message.id);
-
-    // Derive work item type
-    const workItemType = this.deriveWorkItemType(message);
-
-    // Ensure session exists in DB
+    // Ensure session exists in DB (must come before insertSessionMessage due to FK constraint)
     upsertSession(this.db, {
       sessionId: message.sessionId,
       sessionName: message.sessionName ?? undefined,
       sessionType: message.sessionType || 'bot',
       status: 'OPEN_IDLE',
     });
+
+    // Store in session messages table
+    insertSessionMessage(this.db, message.sessionId, 'user', message.content, message.id);
+
+    // Derive work item type
+    const workItemType = this.deriveWorkItemType(message);
 
     // Determine project path
     const projectPath = this.config.workspace.baseDir;
@@ -380,18 +381,24 @@ export class Orchestrator {
         break;
       }
 
-      case 'WORKER_TASK_CANCELLED':
-        this.publishEvent(sessionId, 'Task was cancelled.');
+      case 'WORKER_TASK_CANCELLED': {
+        const cancelContent = 'Task was cancelled.';
+        this.publishEvent(sessionId, cancelContent);
         updateSessionStatus(this.db, sessionId, 'OPEN_IDLE');
+        enqueueOutbox(this.db, 'send_message', { sessionId, content: cancelContent }, sessionId);
         break;
+      }
 
-      case 'WORKER_ERROR':
-        this.publishEvent(sessionId, `Error: ${event.error}`);
+      case 'WORKER_ERROR': {
+        const errorContent = `Error: ${event.error}`;
+        this.publishEvent(sessionId, errorContent);
+        enqueueOutbox(this.db, 'send_message', { sessionId, content: errorContent }, sessionId);
         if (event.fatal) {
           insertSessionMessage(this.db, sessionId, 'system', `Worker error (fatal): ${event.error}`);
           updateSessionStatus(this.db, sessionId, 'ERRORED');
         }
         break;
+      }
 
       case 'WORKER_TASK_STARTED':
         updateSessionStatus(this.db, sessionId, 'OPEN_RUNNING');

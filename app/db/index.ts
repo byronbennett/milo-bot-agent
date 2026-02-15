@@ -8,7 +8,7 @@
 import Database from 'better-sqlite3';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
-import { SCHEMA_SQL } from './schema.js';
+import { SCHEMA_SQL, MIGRATIONS } from './schema.js';
 
 let db: Database.Database | null = null;
 
@@ -29,7 +29,27 @@ export function getDb(workspaceDir: string): Database.Database {
   // Run schema
   db.exec(SCHEMA_SQL);
 
+  // Run migrations (safe to re-run — each handles "already exists" gracefully)
+  runMigrations(db);
+
   return db;
+}
+
+function runMigrations(database: Database.Database): void {
+  for (const sql of MIGRATIONS) {
+    try {
+      database.exec(sql);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // These errors mean the migration already ran or doesn't apply — safe to ignore:
+      // - "duplicate column name": column already exists (ADD COLUMN re-run)
+      // - "no such column": old column already renamed (RENAME COLUMN re-run)
+      if (msg.includes('duplicate column name') || msg.includes('no such column')) {
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 export function closeDb(): void {

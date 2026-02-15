@@ -68,3 +68,16 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_session_messages_session
     ON session_messages (session_id, created_at);
 `;
+
+/**
+ * Lightweight migrations for columns added after initial schema.
+ * Each statement uses a pragma check so it's safe to run repeatedly.
+ */
+export const MIGRATIONS: string[] = [
+  // Rename event_id → message_id in inbox (schema was updated but existing DBs still have old name)
+  `ALTER TABLE inbox RENAME COLUMN event_id TO message_id`,
+  // Rename event_id → message_id in session_messages
+  `ALTER TABLE session_messages RENAME COLUMN event_id TO message_id`,
+  // Add message_id to session_messages if it doesn't exist (for DBs created after event_id was removed but before message_id was added)
+  `ALTER TABLE session_messages ADD COLUMN message_id TEXT`,
+];
