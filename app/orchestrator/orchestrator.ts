@@ -31,6 +31,7 @@ import type { WorkerToOrchestrator } from './ipc-types.js';
 import type { WorkItem, WorkItemType, WorkerState } from './session-types.js';
 import { HeartbeatScheduler } from '../scheduler/heartbeat.js';
 import { Logger, logger } from '../utils/logger.js';
+import { matchBotIdentity } from '../intent/patterns.js';
 import type Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -306,6 +307,10 @@ export class Orchestrator {
     // Derive work item type
     const workItemType = this.deriveWorkItemType(message);
 
+    // Extract bot-identity from message content
+    const identityMatch = matchBotIdentity(message.content);
+    const botIdentity = identityMatch?.identity;
+
     // Determine project path
     const projectPath = this.config.workspace.baseDir;
 
@@ -314,6 +319,7 @@ export class Orchestrator {
       sessionName: message.sessionName ?? message.sessionId,
       sessionType: (message.sessionType as 'chat' | 'bot') || 'bot',
       projectPath,
+      botIdentity,
     });
 
     // If the actor is busy with a task and this is a normal message, steer instead of queue
