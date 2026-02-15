@@ -35,10 +35,18 @@ describe('Intent Parser', () => {
       expect(result.type).toBe('send_message');
     });
 
-    it('returns unknown for greetings', () => {
+    it('recognizes greetings', () => {
       const message = createMessage('hello');
       const result = parseIntent(message, mockConfig);
-      expect(result.type).toBe('unknown');
+      expect(result.type).toBe('greeting');
+    });
+
+    it('extracts @bot-identity from messages', () => {
+      const message = createMessage('@coder fix the login bug');
+      const result = parseIntent(message, mockConfig);
+      expect(result.botIdentity).toBe('coder');
+      expect(result.type).toBe('open_session');
+      expect(result.taskDescription).toContain('login bug');
     });
 
     it('extracts task description from open session intent', () => {

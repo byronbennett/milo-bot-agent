@@ -164,6 +164,18 @@ export function matchGreetingPatterns(content: string): boolean {
 /**
  * Check if content looks like a task (starts with verb or has task indicators)
  */
+/**
+ * Extract @bot-identity mention from message content.
+ * Returns the identity name and the content with the mention removed.
+ */
+export function matchBotIdentity(content: string): { identity: string; remaining: string } | null {
+  const match = content.match(/(?:^|\s)@([\w-]+)\b/);
+  if (!match) return null;
+  const identity = match[1];
+  const remaining = content.replace(match[0], '').trim();
+  return { identity, remaining };
+}
+
 export function looksLikeTask(content: string): boolean {
   const trimmed = content.trim().toLowerCase();
   const firstWord = trimmed.split(/\s+/)[0];

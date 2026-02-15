@@ -9,6 +9,7 @@ import type { PendingMessage, ParsedIntent, AgentConfig } from '../shared';
 import {
   matchOpenSessionPatterns,
   matchGreetingPatterns,
+  matchBotIdentity,
   resolveProjectAlias,
   generateSessionName,
   looksLikeTask,
@@ -30,13 +31,19 @@ export function parseIntent(
 ): ParsedIntent {
   const content = message.content.trim();
 
+  // Extract @bot-identity mention if present
+  const identityMatch = matchBotIdentity(content);
+  const botIdentity = identityMatch?.identity;
+  const effectiveContent = identityMatch?.remaining ?? content;
+
   // Case 1: Message has sessionId - it's a send_message to existing session
   if (message.sessionId) {
     logger.verbose('  Intent: message has sessionId, treating as send_message');
     return {
       type: 'send_message',
       sessionName: message.sessionName ?? undefined,
-      taskDescription: content,
+      taskDescription: effectiveContent,
+      botIdentity,
       confidence: 1.0,
       raw: content,
     };
@@ -44,7 +51,7 @@ export function parseIntent(
 
   // Case 2: Try pattern matching for open_session
   logger.verbose('  Trying pattern matching...');
-  const patternResult = matchOpenSessionPatterns(content);
+  const patternResult = matchOpenSessionPatterns(effectiveContent);
 
   if (patternResult.matched && patternResult.task) {
     const projectName = resolveProjectAlias(
@@ -61,30 +68,33 @@ export function parseIntent(
       projectName,
       sessionName,
       taskDescription: patternResult.task,
+      botIdentity,
       confidence: patternResult.confidence,
       raw: content,
     };
   }
 
   // Case 3: Check if it looks like a task (weak match)
-  if (looksLikeTask(content)) {
-    const sessionName = generateSessionName(content);
+  if (looksLikeTask(effectiveContent)) {
+    const sessionName = generateSessionName(effectiveContent);
     logger.verbose(`  Weak task match (confidence: 0.3), session: ${sessionName}`);
 
     return {
       type: 'open_session',
       sessionName,
-      taskDescription: content,
+      taskDescription: effectiveContent,
+      botIdentity,
       confidence: 0.3, // Low confidence - might need clarification
       raw: content,
     };
   }
 
   // Case 4: Check for greetings (low confidence so AI can generate a proper response)
-  if (matchGreetingPatterns(content)) {
+  if (matchGreetingPatterns(effectiveContent)) {
     logger.verbose('  Greeting pattern matched (confidence: 0.3)');
     return {
       type: 'greeting',
+      botIdentity,
       confidence: 0.3,
       raw: content,
     };
@@ -94,6 +104,7 @@ export function parseIntent(
   logger.verbose('  No pattern matched, intent: unknown');
   return {
     type: 'unknown',
+    botIdentity,
     confidence: 0,
     raw: content,
   };
