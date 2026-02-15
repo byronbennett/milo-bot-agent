@@ -20,10 +20,10 @@
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.52.0",
     "@inquirer/prompts": "^7.2.1",
+    "@mariozechner/pi-agent-core": "^0.52.12",
+    "@mariozechner/pi-ai": "^0.52.12",
     "better-sqlite3": "^12.6.2",
-    "claude-code-js": "^0.4.0",
     "commander": "^12.1.0",
     "node-cron": "^3.0.3",
     "open": "9",
@@ -41,6 +41,9 @@
     "tsup": "^8.3.5",
     "tsx": "^4.21.0",
     "typescript": "^5.7.2"
+  },
+  "optionalDependencies": {
+    "claude-code-js": "^0.4.0"
   },
   "engines": {
     "node": ">=20.0.0"
