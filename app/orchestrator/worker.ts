@@ -3,19 +3,9 @@
  *
  * Spawned by the orchestrator as a child process.
  * Communicates via JSON Lines on stdin (receive) / stdout (send).
- * Stderr is reserved for logging (piped to orchestrator's logger).
  *
- * Lifecycle:
- *   1. Receive WORKER_INIT → initialize session context → send WORKER_READY
- *   2. Receive WORKER_TASK → execute → send WORKER_TASK_DONE
- *   3. Receive WORKER_CANCEL → abort current task → send WORKER_TASK_CANCELLED
- *   4. Receive WORKER_CLOSE → cleanup → exit(0)
- *
- * Orphan handling:
- *   If stdin closes (orchestrator dies), the worker checks whether a sub-agent
- *   is running. If so, it waits up to 30 minutes for it to finish before exiting.
- *
- * Usage: node --import tsx/esm app/orchestrator/worker.ts
+ * Each worker runs one pi-agent-core Agent instance that persists across tasks.
+ * The agent's model, tools, and system prompt are configured via WORKER_INIT.
  */
 
 import { sendIPC, readIPC } from './ipc.js';
@@ -23,16 +13,17 @@ import type {
   WorkerInitMessage,
   WorkerTaskMessage,
   WorkerCancelMessage,
+  WorkerSteerMessage,
+  WorkerAnswerMessage,
   WorkerToOrchestrator,
 } from './ipc-types.js';
 import { sendNotification } from '../utils/notify.js';
 
-const ORPHAN_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const ORPHAN_TIMEOUT_MS = 30 * 60 * 1000;
 
 // Worker state
 let sessionId = '';
 let sessionName = '';
-let sessionType: 'chat' | 'bot' = 'bot';
 let projectPath = '';
 let workspaceDir = '';
 let initialized = false;
@@ -40,8 +31,15 @@ let currentTaskId: string | null = null;
 let cancelRequested = false;
 let orphanHandled = false;
 
-// Claude Code session (lazy, kept alive across tasks)
-let claudeSession: unknown = null;
+// pi-agent-core Agent (lazy, kept alive across tasks)
+let agent: import('@mariozechner/pi-agent-core').Agent | null = null;
+
+// Pending answers for tool safety questions
+const pendingAnswers = new Map<string, (answer: string) => void>();
+
+// Store init config for lazy agent creation
+let initBotIdentity: string | undefined;
+let initConfig: WorkerInitMessage['config'] = {};
 
 function send(msg: WorkerToOrchestrator): void {
   sendIPC(process.stdout, msg);
@@ -54,19 +52,146 @@ function log(message: string): void {
 async function handleInit(msg: WorkerInitMessage): Promise<void> {
   sessionId = msg.sessionId;
   sessionName = msg.sessionName;
-  sessionType = msg.sessionType;
   projectPath = msg.projectPath;
   workspaceDir = msg.workspaceDir;
-
-  // Set API keys if provided
-  if (msg.config.anthropicApiKey) {
-    process.env.ANTHROPIC_API_KEY = msg.config.anthropicApiKey;
-  }
+  initBotIdentity = msg.botIdentity;
+  initConfig = msg.config;
 
   initialized = true;
-  log(`Initialized (type=${sessionType}, project=${projectPath})`);
+  log(`Initialized (project=${projectPath})`);
 
   send({ type: 'WORKER_READY', sessionId, pid: process.pid });
+}
+
+async function createAgent(msg: WorkerInitMessage): Promise<void> {
+  const { Agent } = await import('@mariozechner/pi-agent-core');
+  const { getModel } = await import('@mariozechner/pi-ai');
+  const { loadTools } = await import('../agent-tools/index.js');
+  const { loadBotIdentity } = await import('../agents/bot-identity.js');
+  const { join } = await import('path');
+  const { readFileSync, existsSync } = await import('fs');
+
+  // Load bot-identity
+  const agentsDir = join(workspaceDir, 'agents');
+  const identityName = msg.botIdentity ?? 'default';
+  const identity = loadBotIdentity(agentsDir, identityName);
+
+  // Build system prompt
+  const sections: string[] = [];
+
+  if (identity) {
+    sections.push(identity.systemPromptBody);
+  } else {
+    sections.push(`You are MiloBot, a helpful AI coding agent. You are working on tasks for your user remotely.`);
+  }
+
+  sections.push(`## Current Session\n- Working directory: ${projectPath}\n- Session: ${sessionName}`);
+
+  sections.push(`## Your Capabilities
+You have tools for file operations, shell commands, git, and code search.
+You also have access to CLI coding agents (Claude Code, Gemini CLI, Codex CLI) that you can delegate complex multi-step tasks to.
+If a destructive action is needed, your tools will ask the user for confirmation.
+Always use the notify_user tool to communicate important progress or results to the user.`);
+
+  // Load project context
+  const claudeMdPath = join(projectPath, 'CLAUDE.md');
+  if (existsSync(claudeMdPath)) {
+    const claudeMd = readFileSync(claudeMdPath, 'utf-8');
+    sections.push(`## Project Context (CLAUDE.md)\n${claudeMd}`);
+  }
+
+  // Load user preferences
+  const memoryPath = join(workspaceDir, 'MEMORY.md');
+  if (existsSync(memoryPath)) {
+    const memory = readFileSync(memoryPath, 'utf-8');
+    sections.push(`## User Preferences\n${memory}`);
+  }
+
+  const systemPrompt = sections.join('\n\n');
+
+  // Resolve model
+  const provider = identity?.model?.provider ?? msg.config.agentProvider ?? 'anthropic';
+  const modelId = identity?.model?.id ?? msg.config.agentModel ?? 'claude-sonnet-4-20250514';
+  const model = getModel(provider as any, modelId as any);
+
+  // Resolve tool set
+  const toolSet = identity?.toolSet ?? msg.config.toolSet ?? 'full';
+  const tools = loadTools(toolSet as any, {
+    projectPath,
+    sendNotification: (message: string) => {
+      send({
+        type: 'WORKER_PROGRESS',
+        taskId: currentTaskId ?? '',
+        sessionId,
+        message,
+      });
+    },
+  });
+
+  agent = new Agent({
+    initialState: {
+      systemPrompt,
+      model,
+      tools,
+    },
+    convertToLlm: (messages) =>
+      messages.filter((m) => 'role' in m && ['user', 'assistant', 'toolResult'].includes((m as any).role)),
+    transformContext: async (messages) => {
+      const maxMessages = 100;
+      if (messages.length <= maxMessages) return messages;
+      const head = messages.slice(0, 2);
+      const tail = messages.slice(-maxMessages + 2);
+      return [
+        ...head,
+        { role: 'user' as const, content: `[Earlier: ${messages.length - maxMessages} messages pruned]`, timestamp: Date.now() },
+        ...tail,
+      ];
+    },
+  });
+
+  // Subscribe to events for IPC forwarding
+  agent.subscribe((event) => {
+    if (!currentTaskId) return;
+
+    switch (event.type) {
+      case 'message_update':
+        if (event.assistantMessageEvent?.type === 'text_delta') {
+          send({
+            type: 'WORKER_STREAM_TEXT',
+            sessionId,
+            taskId: currentTaskId,
+            delta: event.assistantMessageEvent.delta,
+          });
+        }
+        break;
+
+      case 'tool_execution_start':
+        send({
+          type: 'WORKER_TOOL_START',
+          sessionId,
+          taskId: currentTaskId,
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+        });
+        break;
+
+      case 'tool_execution_end':
+        send({
+          type: 'WORKER_TOOL_END',
+          sessionId,
+          taskId: currentTaskId,
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          success: !event.isError,
+          summary: typeof event.result?.content?.[0] === 'object' && event.result?.content?.[0]?.type === 'text'
+            ? event.result.content[0].text.slice(0, 200)
+            : undefined,
+        });
+        break;
+    }
+  });
+
+  log(`Agent created (model=${modelId}, tools=${tools.length}, identity=${identityName})`);
 }
 
 async function handleTask(msg: WorkerTaskMessage): Promise<void> {
@@ -82,23 +207,46 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
   log(`Task started: ${msg.taskId}`);
 
   try {
-    let output: string;
-
-    if (sessionType === 'chat') {
-      output = await executeChatTask(msg);
-    } else {
-      output = await executeClaudeCodeTask(msg);
+    // Lazy agent creation on first task
+    if (!agent) {
+      await createAgent({
+        type: 'WORKER_INIT',
+        sessionId,
+        sessionName,
+        sessionType: 'bot',
+        projectPath,
+        workspaceDir,
+        botIdentity: initBotIdentity,
+        config: initConfig,
+      });
     }
+
+    await agent!.prompt(msg.prompt);
 
     if (cancelRequested) {
       send({ type: 'WORKER_TASK_CANCELLED', taskId: msg.taskId, sessionId });
     } else {
+      // Extract final assistant text
+      const messages = agent!.state.messages;
+      const lastAssistant = [...messages].reverse().find((m) => 'role' in m && (m as any).role === 'assistant');
+      let output = '';
+      if (lastAssistant && 'content' in lastAssistant) {
+        if (typeof lastAssistant.content === 'string') {
+          output = lastAssistant.content;
+        } else if (Array.isArray(lastAssistant.content)) {
+          output = (lastAssistant.content as any[])
+            .filter((b) => b.type === 'text')
+            .map((b) => b.text)
+            .join('\n');
+        }
+      }
+
       send({
         type: 'WORKER_TASK_DONE',
         taskId: msg.taskId,
         sessionId,
         success: true,
-        output,
+        output: output || 'Task completed.',
       });
     }
   } catch (err) {
@@ -119,7 +267,6 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
   } finally {
     currentTaskId = null;
     cancelRequested = false;
-    // Signal readiness for next task
     send({ type: 'WORKER_READY', sessionId, pid: process.pid });
   }
 }
@@ -128,58 +275,30 @@ async function handleCancel(_msg: WorkerCancelMessage): Promise<void> {
   log(`Cancel requested for task: ${currentTaskId}`);
   cancelRequested = true;
 
-  // If we have a Claude Code session, abort it
-  if (claudeSession && typeof (claudeSession as { abort?: () => void }).abort === 'function') {
-    (claudeSession as { abort: () => void }).abort();
+  if (agent) {
+    agent.abort();
   }
-
-  // The running task's try/catch will pick up cancelRequested and send WORKER_TASK_CANCELLED
 }
 
-async function executeChatTask(msg: WorkerTaskMessage): Promise<string> {
-  // Dynamic import to avoid loading Anthropic SDK until needed
-  const { default: Anthropic } = await import('@anthropic-ai/sdk');
-  const ai = new Anthropic();
-
-  const messages = msg.context?.chatHistory ?? [];
-  messages.push({ role: 'user', content: msg.prompt });
-
-  const response = await ai.messages.create({
-    model: process.env.AI_MODEL || 'claude-sonnet-4-5-20250929',
-    max_tokens: 4096,
-    system: 'You are MiloBot, a helpful coding assistant. Be concise and helpful.',
-    messages,
-  });
-
-  const textBlock = response.content.find((b) => b.type === 'text');
-  return textBlock?.type === 'text' ? textBlock.text : 'No response generated.';
+function handleSteer(msg: WorkerSteerMessage): void {
+  if (agent) {
+    log(`Steering: ${msg.prompt.slice(0, 80)}...`);
+    agent.steer({ role: 'user', content: msg.prompt, timestamp: Date.now() });
+  }
 }
 
-async function executeClaudeCodeTask(msg: WorkerTaskMessage): Promise<string> {
-  // Dynamic import to avoid loading SDK until needed
-  const { ClaudeCode } = await import('claude-code-js');
-
-  // Reuse or create Claude Code instance
-  if (!claudeSession) {
-    const claude = new ClaudeCode({ workingDirectory: projectPath });
-    claudeSession = claude.newSession();
+function handleAnswer(msg: WorkerAnswerMessage): void {
+  const resolver = pendingAnswers.get(msg.toolCallId);
+  if (resolver) {
+    resolver(msg.answer);
+    pendingAnswers.delete(msg.toolCallId);
   }
-
-  const session = claudeSession as { prompt: (opts: { prompt: string }) => Promise<{ result?: string; cost_usd?: number; duration_ms?: number }> };
-
-  const response = await session.prompt({ prompt: msg.prompt });
-  return response.result ?? 'No output from Claude Code.';
 }
 
 // --- Orphan handling ---
 
-/**
- * Write an audit log entry directly to the worker's own DB connection.
- * Safe to use when orchestrator is dead — WAL mode handles concurrent access.
- */
 async function writeOrphanAuditLog(content: string): Promise<void> {
   if (!workspaceDir || !sessionId) return;
-
   try {
     const { getDb } = await import('../db/index.js');
     const { insertSessionMessage } = await import('../db/sessions-db.js');
@@ -190,54 +309,44 @@ async function writeOrphanAuditLog(content: string): Promise<void> {
   }
 }
 
-/**
- * Handle the orphan state when orchestrator connection is lost (stdin EOF).
- * If a sub-agent is running, wait up to 30 minutes for it to finish.
- */
 async function handleOrphanState(): Promise<void> {
   if (orphanHandled) return;
   orphanHandled = true;
 
   log('Orchestrator connection lost (stdin EOF). Entering orphan state.');
-
   await writeOrphanAuditLog('Orchestrator connection lost. Worker entering orphan state.');
   sendNotification(
     'MiloBot Worker Orphaned',
     `Session "${sessionName || sessionId}" lost orchestrator connection.`,
   );
 
-  if (!currentTaskId && !claudeSession) {
-    log('No sub-agent running. Exiting.');
-    await writeOrphanAuditLog('No sub-agent running. Exiting.');
+  if (!currentTaskId && !agent?.state.isStreaming) {
+    log('No task running. Exiting.');
+    await writeOrphanAuditLog('No task running. Exiting.');
     process.exit(1);
     return;
   }
 
-  log(`Sub-agent running (task: ${currentTaskId}). Waiting up to 30 minutes for completion.`);
-  await writeOrphanAuditLog(`Sub-agent running (task: ${currentTaskId}). Waiting up to 30 minutes for completion.`);
+  log(`Task running (${currentTaskId}). Waiting up to 30 minutes.`);
+  await writeOrphanAuditLog(`Task running (${currentTaskId}). Waiting up to 30 minutes.`);
 
   const deadline = Date.now() + ORPHAN_TIMEOUT_MS;
-
   const poll = setInterval(async () => {
-    if (!currentTaskId && !claudeSession) {
+    if (!currentTaskId && !agent?.state.isStreaming) {
       clearInterval(poll);
-      log('Sub-agent completed. Exiting orphaned worker.');
-      await writeOrphanAuditLog('Sub-agent completed. Exiting orphaned worker.');
+      log('Task completed. Exiting orphaned worker.');
+      await writeOrphanAuditLog('Task completed. Exiting orphaned worker.');
       process.exit(0);
     }
     if (Date.now() > deadline) {
       clearInterval(poll);
       log('Orphan timeout reached (30 min). Force exiting.');
-      await writeOrphanAuditLog('Orphan timeout reached (30 min). Force exiting.');
+      await writeOrphanAuditLog('Orphan timeout reached. Force exiting.');
       process.exit(1);
     }
   }, 5000);
 }
 
-/**
- * Monitor stdin for EOF independently of the message loop.
- * This fires when the orchestrator process dies or closes the pipe.
- */
 function monitorStdinEOF(): void {
   process.stdin.on('end', () => {
     handleOrphanState();
@@ -248,7 +357,6 @@ function monitorStdinEOF(): void {
 
 async function main(): Promise<void> {
   log('Worker process starting...');
-
   monitorStdinEOF();
 
   for await (const msg of readIPC(process.stdin)) {
@@ -262,6 +370,12 @@ async function main(): Promise<void> {
       case 'WORKER_CANCEL':
         await handleCancel(msg);
         break;
+      case 'WORKER_STEER':
+        handleSteer(msg);
+        break;
+      case 'WORKER_ANSWER':
+        handleAnswer(msg);
+        break;
       case 'WORKER_CLOSE':
         log('Close requested, exiting...');
         process.exit(0);
@@ -271,8 +385,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // stdin closed — let the orphan handler decide what to do
-  // (monitorStdinEOF will have already fired or will fire shortly)
   await handleOrphanState();
 }
 
