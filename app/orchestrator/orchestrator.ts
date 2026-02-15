@@ -316,6 +316,23 @@ export class Orchestrator {
       projectPath,
     });
 
+    // If the actor is busy with a task and this is a normal message, steer instead of queue
+    if (workItemType === 'USER_MESSAGE' && actor.status === 'OPEN_RUNNING') {
+      this.actorManager.steer(message.sessionId, message.content);
+      this.logger.verbose(`Steered running session ${message.sessionId}`);
+      return;
+    }
+
+    // If the actor is waiting for an answer and this is a normal message, answer
+    if (workItemType === 'USER_MESSAGE' && actor.status === 'OPEN_WAITING_USER' && actor.currentTask) {
+      // Find the pending question's toolCallId from the last WORKER_QUESTION event
+      // For simplicity, use the message content as the answer for the current task
+      // The worker tracks pending answers by toolCallId
+      this.actorManager.answer(message.sessionId, '', message.content);
+      this.logger.verbose(`Answered waiting session ${message.sessionId}`);
+      return;
+    }
+
     // Enqueue work item
     const isControl = ['CANCEL', 'CLOSE_SESSION', 'STATUS_REQUEST'].includes(workItemType);
     const workItem: WorkItem = {
@@ -412,6 +429,29 @@ export class Orchestrator {
 
       case 'WORKER_PROGRESS':
         this.publishEvent(sessionId, event.message);
+        break;
+
+      case 'WORKER_STREAM_TEXT':
+        // Real-time text streaming — publish to user via PubNub
+        this.publishEvent(sessionId, event.delta);
+        break;
+
+      case 'WORKER_TOOL_START':
+        this.publishEvent(sessionId, `Using tool: ${event.toolName}...`);
+        break;
+
+      case 'WORKER_TOOL_END':
+        // Only publish tool end if it failed
+        if (!event.success) {
+          this.publishEvent(sessionId, `Tool ${event.toolName} failed: ${event.summary ?? 'unknown error'}`);
+        }
+        break;
+
+      case 'WORKER_QUESTION':
+        updateSessionStatus(this.db, sessionId, 'OPEN_WAITING_USER');
+        this.publishEvent(sessionId, event.question);
+        insertSessionMessage(this.db, sessionId, 'agent', event.question);
+        enqueueOutbox(this.db, 'send_message', { sessionId, content: event.question }, sessionId);
         break;
     }
   }
