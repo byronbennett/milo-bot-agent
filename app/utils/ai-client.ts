@@ -56,7 +56,7 @@ export async function complete(
 
   const response = await piComplete(utilityModel, {
     systemPrompt: options.system,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
   });
 
   const textBlock = response.content.find((b) => b.type === 'text');

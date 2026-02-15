@@ -39,6 +39,14 @@ export const defaultConfig: AgentConfig = {
   },
   ai: {
     model: 'claude-sonnet-4-5',
+    agent: {
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-20250514',
+    },
+    utility: {
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5-20251001',
+    },
   },
   messaging: {
     activeAdapter: 'webapp',

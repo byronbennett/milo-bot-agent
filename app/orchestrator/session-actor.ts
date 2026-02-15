@@ -28,8 +28,10 @@ import { Logger } from '../utils/logger.js';
 export interface SessionActorManagerOptions {
   workspaceDir: string;
   workerScript: string;
-  anthropicApiKey?: string;
-  aiModel?: string;
+  agentProvider?: string;
+  agentModel?: string;
+  utilityProvider?: string;
+  utilityModel?: string;
   logger: Logger;
   onWorkerEvent: (sessionId: string, event: WorkerToOrchestrator) => void;
   onWorkerStateChange?: (sessionId: string, pid: number | null, state: WorkerState) => void;
@@ -52,6 +54,7 @@ export class SessionActorManager {
     sessionName: string;
     sessionType: 'chat' | 'bot';
     projectPath: string;
+    botIdentity?: string;
   }): Promise<SessionActor> {
     let actor = this.actors.get(sessionId);
 
@@ -66,6 +69,7 @@ export class SessionActorManager {
         queueHigh: [],
         queueNormal: [],
         projectPath: meta.projectPath,
+        botIdentity: meta.botIdentity,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -200,6 +204,33 @@ export class SessionActorManager {
     this.actors.clear();
   }
 
+  /**
+   * Steer a running task with additional user input.
+   */
+  steer(sessionId: string, prompt: string): void {
+    const actor = this.actors.get(sessionId);
+    if (!actor || !actor.worker || actor.worker.state !== 'busy') {
+      this.logger.warn(`Cannot steer session ${sessionId}: not busy`);
+      return;
+    }
+    this.sendToWorker(actor, { type: 'WORKER_STEER', prompt });
+  }
+
+  /**
+   * Answer a question from the worker (tool asking for user input).
+   */
+  answer(sessionId: string, toolCallId: string, answerText: string): void {
+    const actor = this.actors.get(sessionId);
+    if (!actor || !actor.worker || actor.worker.state === 'dead') {
+      this.logger.warn(`Cannot answer for session ${sessionId}: no live worker`);
+      return;
+    }
+    this.sendToWorker(actor, { type: 'WORKER_ANSWER', toolCallId, answer: answerText });
+    if (actor.status === 'OPEN_WAITING_USER') {
+      actor.status = 'OPEN_RUNNING';
+    }
+  }
+
   // --- Private helpers ---
 
   private setWorkerState(actor: SessionActor, state: WorkerState): void {
@@ -256,9 +287,12 @@ export class SessionActorManager {
       sessionType: actor.sessionType,
       projectPath: actor.projectPath,
       workspaceDir: this.options.workspaceDir,
+      botIdentity: actor.botIdentity,
       config: {
-        aiModel: this.options.aiModel ?? 'claude-sonnet-4-5-20250929',
-        anthropicApiKey: this.options.anthropicApiKey,
+        agentProvider: this.options.agentProvider,
+        agentModel: this.options.agentModel,
+        utilityProvider: this.options.utilityProvider,
+        utilityModel: this.options.utilityModel,
       },
     });
 
@@ -341,6 +375,16 @@ export class SessionActorManager {
 
       case 'WORKER_PROGRESS':
         // Just forward to orchestrator callback
+        break;
+
+      case 'WORKER_STREAM_TEXT':
+      case 'WORKER_TOOL_START':
+      case 'WORKER_TOOL_END':
+        // Forward to orchestrator for publishing to clients
+        break;
+
+      case 'WORKER_QUESTION':
+        actor.status = 'OPEN_WAITING_USER';
         break;
     }
 

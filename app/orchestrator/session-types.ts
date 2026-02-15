@@ -54,6 +54,7 @@ export interface SessionActor {
   queueHigh: WorkItem[];
   queueNormal: WorkItem[];
   projectPath: string;
+  botIdentity?: string;
   createdAt: Date;
   updatedAt: Date;
 }

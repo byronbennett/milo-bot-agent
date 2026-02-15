@@ -98,8 +98,10 @@ export class Orchestrator {
     this.actorManager = new SessionActorManager({
       workspaceDir: this.config.workspace.baseDir,
       workerScript,
-      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-      aiModel: this.config.ai.model,
+      agentProvider: this.config.ai.agent.provider,
+      agentModel: this.config.ai.agent.model,
+      utilityProvider: this.config.ai.utility.provider,
+      utilityModel: this.config.ai.utility.model,
       logger: this.logger,
       onWorkerEvent: this.handleWorkerEvent.bind(this),
       onWorkerStateChange: (sessionId: string, pid: number | null, state: WorkerState) => {
