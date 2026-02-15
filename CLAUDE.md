@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MiloBot Agent is a TypeScript CLI that acts as a remote control for Claude Code. It runs as a daemon, polling a remote server for user messages, parsing intent, and delegating work to Claude Code sessions. The package is published as `milo-bot-agent` with a `milo` CLI binary.
+MiloBot Agent is a TypeScript CLI that acts as a remote control for AI coding agents. It runs as a daemon, receiving user messages via PubNub (real-time) or REST polling, and delegates work to worker processes that use pi-agent-core for multi-provider LLM interactions. The package is published as `milo-bot-agent` with a `milo` CLI binary.
 
 ## Commands
 
@@ -41,34 +41,50 @@ ESM throughout (`"type": "module"`). TypeScript targets ES2022, bundled with tsu
 
 ### Source Layout (`app/`)
 
-**Entry points:** `bin/milo.ts` (CLI) → `cli.ts` (commander routing) → `agent.ts` (main orchestrator, ~565 lines)
+**Entry points:** `bin/milo.ts` (CLI) → `cli.ts` (commander routing) → `orchestrator/orchestrator.ts` (main process)
 
-**Core pipeline — message processing flows through these in order:**
-1. `messaging/` — Adapter pattern with two implementations: `WebAppAdapter` (REST polling) and `PubNubAdapter` (real-time pub/sub). Both implement `MessagingAdapter` interface.
-2. `intent/` — Parses user text into structured `ParsedIntent`. Uses regex patterns first (`patterns.ts`), falls back to AI if `ANTHROPIC_API_KEY` is set.
-3. `prompt/` — Enhances casual task descriptions into detailed Claude Code prompts. Template-based (`templates.ts`) with optional AI enhancement.
-4. `task/` — DAG-based task orchestrator. Tasks declare `dependsOn` by ID. Executor dispatches by `TaskType` (claude_code, file_*, git_*, shell, notify_user, etc.). Includes retry with exponential backoff (`retry.ts`).
-5. `claude-code/` — Wrapper around `claude-code-js` SDK. Manages sessions, sends prompts, integrates with auto-answer.
-6. `auto-answer/` — Three-tier system for automatically answering Claude Code questions: (1) obvious pattern matching, (2) RULES.md rule lookup, (3) AI judgment with confidence scoring.
+**Orchestrator (single process):**
+- `orchestrator/orchestrator.ts` — Owns PubNub subscription, SQLite, session actor lifecycle, outbox flush, heartbeat. Routes messages to session actors.
+- `orchestrator/session-actor.ts` — Manages per-session worker processes. Handles spawn/respawn, work queues (high priority for control, normal for messages), cancel escalation (SIGINT → SIGTERM → SIGKILL), steer/answer forwarding.
+- `orchestrator/session-types.ts` — SessionActor, WorkItem, WorkerHandle types.
+- `orchestrator/ipc-types.ts` — JSON Lines IPC protocol between orchestrator and workers.
+- `orchestrator/ipc.ts` — sendIPC/parseIPC helpers for stdin/stdout JSON Lines.
+
+**Worker (child process per session):**
+- `orchestrator/worker.ts` — Reads IPC from stdin, creates a pi-agent-core `Agent` with tools, runs prompts, forwards events (streaming text, tool execution, questions) back to orchestrator via stdout.
+
+**Core modules:**
+1. `messaging/` — Adapter pattern: `WebAppAdapter` (REST polling) and `PubNubAdapter` (real-time pub/sub).
+2. `intent/` — Parses user text into structured `ParsedIntent`. Regex patterns first (`patterns.ts`), AI fallback via pi-ai. Extracts `@bot-identity` mentions.
+3. `agents/` — Bot-identity system. Loads `.md` files with YAML frontmatter defining agent personas, model/provider overrides, and tool sets.
+4. `agent-tools/` — Tool registry for pi-agent-core agents. Core tools (file, bash, search, git, notify) and CLI agent tools (claude_code, gemini_cli, codex_cli, browser). `loadTools(toolSet, ctx)` dispatches by set name.
+5. `auto-answer/` — Three-tier system for automatically answering questions: (1) obvious pattern matching, (2) RULES.md rule lookup, (3) AI judgment.
 
 **Supporting modules:**
+- `config/` — Zod-validated config with `ai.agent` and `ai.utility` sub-configs for provider/model selection.
+- `db/` — SQLite via better-sqlite3 for inbox, outbox, and session persistence.
 - `session/` — Markdown-based session persistence in `~/milo-workspace/SESSION/`
-- `scheduler/` — `node-cron` heartbeat (default 3 min interval)
-- `tools/` — Plugin registry for built-in and custom tools with safety checks
-- `config/` — Zod-validated config loaded from `~/milo-workspace/config.json` + `.env` + macOS keychain
-- `utils/logger.ts` — Color-coded singleton logger with levels
-- `utils/ai-client.ts` — Anthropic SDK wrapper
-- `utils/keychain.ts` — macOS `security` command integration
+- `scheduler/` — Heartbeat scheduling (default 3 min, 5s with PubNub).
+- `utils/ai-client.ts` — pi-ai wrapper for utility AI calls (intent parsing, prompt enhancement).
+- `utils/logger.ts` — Color-coded singleton logger with levels.
+- `utils/keychain.ts` — macOS `security` command integration.
 
-### Graceful Degradation
-When `ANTHROPIC_API_KEY` is not set, all AI features (intent parsing, prompt enhancement, auto-answer AI tier) fall back to pattern matching and templates. The agent remains fully functional without it.
+**Legacy (deprecated):**
+- `claude-code/` — Former claude-code-js SDK bridge. Replaced by pi-agent-core in workers. Stubs remain for backward compatibility with `agent.ts` and `task/executor.ts`.
+- `agent.ts` — Former monolithic agent class. Being replaced by orchestrator pattern.
+
+### Key Libraries
+- **@mariozechner/pi-agent-core** — Agent framework with tool execution, streaming, and event subscriptions.
+- **@mariozechner/pi-ai** — Multi-provider LLM client (Anthropic, OpenAI, Google, xAI). `getModel(provider, modelId)` + `complete(model, context)`.
+- **@sinclair/typebox** — JSON schema definitions for agent tool parameters (re-exported by pi-ai as `Type`).
 
 ### Key Patterns
-- **Adapter pattern** for messaging (swap REST vs PubNub)
-- **Handler registry** for task and tool execution (Map-based dispatch by type)
-- **DAG resolution** for task dependencies
-- **Exponential backoff with jitter** for retries
-- **Zod schemas** for all config validation with defaults merging
+- **Worker-per-session** — Each session gets a dedicated child process for crash isolation.
+- **JSON Lines IPC** — Orchestrator ↔ worker communication via stdin/stdout.
+- **Adapter pattern** for messaging (swap REST vs PubNub).
+- **Bot-identity** — User-defined `.md` persona files with frontmatter overrides.
+- **Steering** — Messages to busy sessions forwarded as `agent.steer()` instead of queueing.
+- **Zod schemas** for all config validation with defaults merging.
 
 ## Testing
 
