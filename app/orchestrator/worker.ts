@@ -269,6 +269,9 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
 
     const promptStart = Date.now();
     log(`Calling agent.prompt()...`);
+    log(`  Model: ${currentModel ?? initConfig.agentModel ?? '(default)'}`);
+    log(`  System prompt (${agent!.state.systemPrompt.length} chars):\n${agent!.state.systemPrompt}`);
+    log(`  User prompt: ${msg.prompt}`);
     await agent!.prompt(msg.prompt);
     const promptDuration = Date.now() - promptStart;
     log(`agent.prompt() completed in ${promptDuration}ms`);
