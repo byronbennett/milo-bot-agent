@@ -1,8 +1,22 @@
 import { Type } from '@mariozechner/pi-ai';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
+import type { ToolContext } from './index.js';
+import type {
+  SDKMessage,
+  SDKResultMessage,
+  PermissionResult,
+} from '@anthropic-ai/claude-agent-sdk';
+import { shouldAutoAnswer } from '../auto-answer/index.js';
 
 const ClaudeCodeParams = Type.Object({
-  prompt: Type.String({ description: 'Detailed task description for Claude Code' }),
+  prompt: Type.String({ description: 'Detailed task description or follow-up message for Claude Code' }),
+  sessionId: Type.Optional(
+    Type.String({
+      description:
+        'Resume an existing Claude Code session by ID. Omit to start a new session. ' +
+        'Use this to continue a multi-turn conversation with Claude Code.',
+    }),
+  ),
   workingDirectory: Type.Optional(
     Type.String({ description: 'Override working directory (default: project directory)' }),
   ),
@@ -12,40 +26,166 @@ const SimplePromptParams = Type.Object({
   prompt: Type.String({ description: 'Task description' }),
 });
 
-export function createCliAgentTools(projectPath: string): AgentTool<any>[] {
+// Track known session IDs for resume validation
+const knownSessionIds = new Set<string>();
+
+/**
+ * Build the canUseTool callback for Claude Code Agent SDK.
+ *
+ * - For AskUserQuestion: try auto-answer first, then forward to user
+ * - For all other tools: allow (bypassPermissions handles most cases)
+ */
+function buildCanUseTool(ctx: ToolContext) {
+  return async (
+    toolName: string,
+    input: Record<string, unknown>,
+    options: { signal: AbortSignal; toolUseID: string },
+  ): Promise<PermissionResult> => {
+    if (toolName === 'AskUserQuestion') {
+      const question = typeof input.question === 'string'
+        ? input.question
+        : JSON.stringify(input);
+
+      // Extract options from AskUserQuestion input
+      let questionOptions: string[] | undefined;
+      if (Array.isArray(input.questions)) {
+        // AskUserQuestion has a questions array with options
+        const q = input.questions[0] as Record<string, unknown> | undefined;
+        if (q && Array.isArray(q.options)) {
+          questionOptions = (q.options as Array<{ label?: string }>).map(
+            (o) => o.label ?? String(o),
+          );
+        }
+      }
+
+      // Step 1: Try auto-answer
+      const autoResult = await shouldAutoAnswer(question, {
+        workspaceDir: ctx.workspaceDir,
+      });
+
+      if (autoResult.shouldAnswer && autoResult.answer) {
+        return {
+          behavior: 'deny',
+          message: autoResult.answer,
+        };
+      }
+
+      // Step 2: Forward to user
+      const answer = await ctx.askUser({
+        toolCallId: options.toolUseID,
+        question,
+        options: questionOptions,
+      });
+
+      return {
+        behavior: 'deny',
+        message: answer,
+      };
+    }
+
+    // All other tools: allow
+    return { behavior: 'allow', updatedInput: input };
+  };
+}
+
+/**
+ * Extract text content from an assistant message's content blocks.
+ */
+function extractTextFromContent(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((b: any) => b.type === 'text')
+    .map((b: any) => b.text)
+    .join('\n');
+}
+
+export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
   const claudeCodeTool: AgentTool<typeof ClaudeCodeParams> = {
     name: 'claude_code_cli',
     label: 'Claude Code',
     description:
-      'Delegate a complex coding task to Claude Code CLI. Best for multi-file refactors, large features, or tasks that benefit from Claude Code\'s specialized coding capabilities.',
+      'Delegate a complex coding task to Claude Code CLI. Best for multi-file refactors, large features, or tasks that benefit from Claude Code\'s specialized coding capabilities. ' +
+      'Supports multi-turn conversations: the first call returns a session_id, pass it back on subsequent calls to continue the conversation.',
     parameters: ClaudeCodeParams,
-    execute: async (_toolCallId, params, _signal, onUpdate) => {
-      let ClaudeCode;
-      try {
-        const mod = await import('claude-code-js');
-        ClaudeCode = mod.ClaudeCode;
-      } catch {
-        throw new Error(
-          'claude-code-js is not installed. Install it with: pnpm add claude-code-js',
-        );
-      }
+    execute: async (_toolCallId, params, signal, onUpdate) => {
+      const { query } = await import('@anthropic-ai/claude-agent-sdk');
+
+      const cwd = params.workingDirectory ?? ctx.projectPath;
+      const isResume = params.sessionId && knownSessionIds.has(params.sessionId);
 
       onUpdate?.({
-        content: [{ type: 'text', text: 'Delegating to Claude Code...' }],
+        content: [{
+          type: 'text',
+          text: isResume
+            ? `Resuming Claude Code session ${params.sessionId}...`
+            : 'Starting new Claude Code session...',
+        }],
         details: {},
       });
 
-      const claude = new ClaudeCode({
-        workingDirectory: params.workingDirectory ?? projectPath,
-      });
-      const session = claude.newSession();
-      const result = await session.prompt({ prompt: params.prompt });
+      // Build abort controller wired to incoming signal
+      const abortController = new AbortController();
+      if (signal) {
+        signal.addEventListener('abort', () => abortController.abort(), { once: true });
+      }
+
+      const queryOptions: Record<string, unknown> = {
+        cwd,
+        permissionMode: 'bypassPermissions' as const,
+        allowDangerouslySkipPermissions: true,
+        canUseTool: buildCanUseTool(ctx),
+        abortController,
+        includePartialMessages: true,
+      };
+
+      if (isResume) {
+        queryOptions.resume = params.sessionId;
+      }
+
+      let sessionId: string | undefined;
+      let resultMessage: SDKResultMessage | undefined;
+      let lastAssistantText = '';
+
+      for await (const message of query({ prompt: params.prompt, options: queryOptions })) {
+        handleMessage(message, ctx, {
+          onSessionId: (id) => {
+            sessionId = id;
+            knownSessionIds.add(id);
+          },
+          onResultMessage: (msg) => {
+            resultMessage = msg;
+          },
+          onAssistantText: (text) => {
+            lastAssistantText = text;
+          },
+        });
+      }
+
+      // Build output from result
+      let output: string;
+      if (resultMessage && resultMessage.subtype === 'success') {
+        output = resultMessage.result || lastAssistantText || 'Task completed.';
+      } else if (resultMessage && 'errors' in resultMessage) {
+        output = `Claude Code ended with errors: ${resultMessage.errors.join(', ')}`;
+      } else {
+        output = lastAssistantText || 'No output from Claude Code.';
+      }
+
+      const finalSessionId = sessionId ?? (resultMessage as any)?.session_id;
 
       return {
-        content: [{ type: 'text', text: result.result ?? 'No output from Claude Code.' }],
+        content: [{
+          type: 'text',
+          text: output +
+            (finalSessionId
+              ? `\n\n[Claude Code session_id: ${finalSessionId} — pass this to continue the conversation]`
+              : ''),
+        }],
         details: {
-          cost_usd: result.cost_usd,
-          duration_ms: result.duration_ms,
+          session_id: finalSessionId,
+          cost_usd: resultMessage?.total_cost_usd,
+          duration_ms: resultMessage?.duration_ms,
+          num_turns: resultMessage?.num_turns,
         },
       };
     },
@@ -72,4 +212,65 @@ export function createCliAgentTools(projectPath: string): AgentTool<any>[] {
   };
 
   return [claudeCodeTool, geminiCliTool, codexCliTool];
+}
+
+/**
+ * Process a single SDKMessage from the Claude Code async generator.
+ * Forwards events to the orchestrator via ctx.sendIpcEvent.
+ */
+function handleMessage(
+  message: SDKMessage,
+  ctx: ToolContext,
+  callbacks: {
+    onSessionId: (id: string) => void;
+    onResultMessage: (msg: SDKResultMessage) => void;
+    onAssistantText: (text: string) => void;
+  },
+): void {
+  switch (message.type) {
+    case 'system':
+      if ('subtype' in message && message.subtype === 'init') {
+        callbacks.onSessionId(message.session_id);
+      }
+      break;
+
+    case 'stream_event':
+      // SDKPartialAssistantMessage — forward text deltas
+      if (message.event?.type === 'content_block_delta') {
+        const delta = (message.event as any).delta;
+        if (delta?.type === 'text_delta' && delta.text) {
+          ctx.sendIpcEvent?.({
+            type: 'stream_text',
+            delta: delta.text,
+          });
+        }
+      }
+      break;
+
+    case 'assistant': {
+      // Forward tool_use blocks as tool_start events
+      const content = message.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if ((block as any).type === 'tool_use') {
+            ctx.sendIpcEvent?.({
+              type: 'tool_start',
+              toolName: `CC:${(block as any).name}`,
+              toolCallId: (block as any).id,
+            });
+          }
+        }
+        // Capture latest assistant text
+        const text = extractTextFromContent(content);
+        if (text) {
+          callbacks.onAssistantText(text);
+        }
+      }
+      break;
+    }
+
+    case 'result':
+      callbacks.onResultMessage(message as SDKResultMessage);
+      break;
+  }
 }

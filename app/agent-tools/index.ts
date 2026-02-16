@@ -13,7 +13,25 @@ export type ToolSet = 'full' | 'chat' | 'minimal' | string[];
 
 export interface ToolContext {
   projectPath: string;
+  workspaceDir: string;
+  sessionId: string;
+  sessionName: string;
+  currentTaskId: () => string | null;
   sendNotification: (message: string) => void;
+  askUser: (opts: {
+    toolCallId: string;
+    question: string;
+    options?: string[];
+  }) => Promise<string>;
+  sendIpcEvent?: (event: {
+    type: 'tool_start' | 'tool_end' | 'stream_text' | 'progress';
+    toolName?: string;
+    toolCallId?: string;
+    delta?: string;
+    message?: string;
+    success?: boolean;
+    summary?: string;
+  }) => void;
 }
 
 export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] {
@@ -23,7 +41,7 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
     ...createSearchTools(ctx.projectPath),
     ...createGitTools(ctx.projectPath),
   ];
-  const cliTools = createCliAgentTools(ctx.projectPath);
+  const cliTools = createCliAgentTools(ctx);
   const uiTools = [createNotifyTool(ctx.sendNotification)];
 
   switch (toolSet) {

@@ -162,6 +162,10 @@ When asked to research something (find YouTube channels, compare options, gather
   const toolSet = initConfig.toolSet ?? 'full';
   const tools = loadTools(toolSet as any, {
     projectPath,
+    workspaceDir,
+    sessionId,
+    sessionName,
+    currentTaskId: () => currentTaskId,
     sendNotification: (message: string) => {
       send({
         type: 'WORKER_PROGRESS',
@@ -169,6 +173,68 @@ When asked to research something (find YouTube channels, compare options, gather
         sessionId,
         message,
       });
+    },
+    askUser: ({ toolCallId, question, options }) => {
+      return new Promise<string>((resolve) => {
+        pendingAnswers.set(toolCallId, resolve);
+        send({
+          type: 'WORKER_QUESTION',
+          sessionId,
+          taskId: currentTaskId ?? '',
+          toolCallId,
+          question,
+          options,
+        });
+      });
+    },
+    sendIpcEvent: (event) => {
+      if (!currentTaskId) return;
+      switch (event.type) {
+        case 'stream_text':
+          if (event.delta) {
+            send({
+              type: 'WORKER_STREAM_TEXT',
+              sessionId,
+              taskId: currentTaskId,
+              delta: event.delta,
+            });
+          }
+          break;
+        case 'tool_start':
+          if (event.toolName && event.toolCallId) {
+            send({
+              type: 'WORKER_TOOL_START',
+              sessionId,
+              taskId: currentTaskId,
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
+            });
+          }
+          break;
+        case 'tool_end':
+          if (event.toolName && event.toolCallId) {
+            send({
+              type: 'WORKER_TOOL_END',
+              sessionId,
+              taskId: currentTaskId,
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
+              success: event.success ?? true,
+              summary: event.summary,
+            });
+          }
+          break;
+        case 'progress':
+          if (event.message) {
+            send({
+              type: 'WORKER_PROGRESS',
+              sessionId,
+              taskId: currentTaskId,
+              message: event.message,
+            });
+          }
+          break;
+      }
     },
   });
 
