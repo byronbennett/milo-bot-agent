@@ -27,6 +27,7 @@ export const defaultConfig: AgentConfig = {
     maxConcurrentSessions: 3,
     startupMaxRetries: 5,
     startupRetryIntervalSeconds: 30,
+    preferAPIKey: false,
   },
   scheduler: {
     heartbeatIntervalMinutes: 3,

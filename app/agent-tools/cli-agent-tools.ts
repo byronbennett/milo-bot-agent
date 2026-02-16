@@ -2,11 +2,11 @@ import { Type } from '@mariozechner/pi-ai';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { ToolContext } from './index.js';
 import type {
-  SDKMessage,
   SDKResultMessage,
   PermissionResult,
 } from '@anthropic-ai/claude-agent-sdk';
 import { shouldAutoAnswer } from '../auto-answer/index.js';
+import { handleMessage, extractTextFromContent } from './claude-event-handler.js';
 
 const ClaudeCodeParams = Type.Object({
   prompt: Type.String({ description: 'Detailed task description or follow-up message for Claude Code' }),
@@ -86,17 +86,6 @@ function buildCanUseTool(ctx: ToolContext) {
     // All other tools: allow
     return { behavior: 'allow', updatedInput: input };
   };
-}
-
-/**
- * Extract text content from an assistant message's content blocks.
- */
-function extractTextFromContent(content: unknown): string {
-  if (!Array.isArray(content)) return '';
-  return content
-    .filter((b: any) => b.type === 'text')
-    .map((b: any) => b.text)
-    .join('\n');
 }
 
 export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
@@ -214,63 +203,3 @@ export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
   return [claudeCodeTool, geminiCliTool, codexCliTool];
 }
 
-/**
- * Process a single SDKMessage from the Claude Code async generator.
- * Forwards events to the orchestrator via ctx.sendIpcEvent.
- */
-function handleMessage(
-  message: SDKMessage,
-  ctx: ToolContext,
-  callbacks: {
-    onSessionId: (id: string) => void;
-    onResultMessage: (msg: SDKResultMessage) => void;
-    onAssistantText: (text: string) => void;
-  },
-): void {
-  switch (message.type) {
-    case 'system':
-      if ('subtype' in message && message.subtype === 'init') {
-        callbacks.onSessionId(message.session_id);
-      }
-      break;
-
-    case 'stream_event':
-      // SDKPartialAssistantMessage — forward text deltas
-      if (message.event?.type === 'content_block_delta') {
-        const delta = (message.event as any).delta;
-        if (delta?.type === 'text_delta' && delta.text) {
-          ctx.sendIpcEvent?.({
-            type: 'stream_text',
-            delta: delta.text,
-          });
-        }
-      }
-      break;
-
-    case 'assistant': {
-      // Forward tool_use blocks as tool_start events
-      const content = message.message?.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if ((block as any).type === 'tool_use') {
-            ctx.sendIpcEvent?.({
-              type: 'tool_start',
-              toolName: `CC:${(block as any).name}`,
-              toolCallId: (block as any).id,
-            });
-          }
-        }
-        // Capture latest assistant text
-        const text = extractTextFromContent(content);
-        if (text) {
-          callbacks.onAssistantText(text);
-        }
-      }
-      break;
-    }
-
-    case 'result':
-      callbacks.onResultMessage(message as SDKResultMessage);
-      break;
-  }
-}

@@ -19,6 +19,7 @@ export interface WorkerInitMessage {
     utilityModel?: string;
     toolSet?: string;
     streaming?: boolean;
+    preferAPIKeyClaude?: boolean;
     apiUrl: string;
     apiKey: string;
     personasDir: string;

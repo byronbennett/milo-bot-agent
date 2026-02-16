@@ -5,6 +5,7 @@ import { createSearchTools } from './search-tools.js';
 import { createGitTools } from './git-tools.js';
 import { createNotifyTool } from './notify-tool.js';
 import { createCliAgentTools } from './cli-agent-tools.js';
+import { createClaudeCodeOAuthTool } from './claude-code-oauth-tool.js';
 import { createBrowserTool } from './browser-tool.js';
 
 export { isDangerousCommand } from './bash-tool.js';
@@ -17,6 +18,7 @@ export interface ToolContext {
   sessionId: string;
   sessionName: string;
   currentTaskId: () => string | null;
+  preferAPIKeyClaude?: boolean;
   sendNotification: (message: string) => void;
   askUser: (opts: {
     toolCallId: string;
@@ -41,7 +43,9 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
     ...createSearchTools(ctx.projectPath),
     ...createGitTools(ctx.projectPath),
   ];
-  const cliTools = createCliAgentTools(ctx);
+  const cliTools = ctx.preferAPIKeyClaude
+    ? createCliAgentTools(ctx)
+    : [createClaudeCodeOAuthTool(ctx), ...createCliAgentTools(ctx).filter((t) => t.name !== 'claude_code_cli')];
   const uiTools = [createNotifyTool(ctx.sendNotification)];
 
   switch (toolSet) {

@@ -18,6 +18,7 @@ export const claudeCodeConfigSchema = z.object({
   maxConcurrentSessions: z.number().min(1).max(10).default(3),
   startupMaxRetries: z.number().min(1).max(10).default(5),
   startupRetryIntervalSeconds: z.number().min(10).max(120).default(30),
+  preferAPIKey: z.boolean().default(false),
 });
 
 export const schedulerConfigSchema = z.object({

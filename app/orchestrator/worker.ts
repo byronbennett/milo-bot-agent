@@ -166,6 +166,7 @@ When asked to research something (find YouTube channels, compare options, gather
     sessionId,
     sessionName,
     currentTaskId: () => currentTaskId,
+    preferAPIKeyClaude: initConfig.preferAPIKeyClaude,
     sendNotification: (message: string) => {
       send({
         type: 'WORKER_PROGRESS',

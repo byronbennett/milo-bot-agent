@@ -106,6 +106,7 @@ export class Orchestrator {
       utilityProvider: this.config.ai.utility.provider,
       utilityModel: this.config.ai.utility.model,
       streaming: this.config.streaming,
+      preferAPIKeyClaude: this.config.claudeCode.preferAPIKey,
       apiUrl: this.config.messaging.webapp.apiUrl,
       apiKey: process.env.MILO_API_KEY || '',
       personasDir: join(this.config.workspace.baseDir, this.config.workspace.personasDir),
@@ -476,7 +477,11 @@ export class Orchestrator {
       }
 
       case 'WORKER_TASK_CANCELLED': {
-        const cancelContent = 'Task was cancelled.';
+        const actor = this.actorManager.get(sessionId);
+        const name = actor?.sessionName ?? sessionId;
+        const cancelContent = event.taskId
+          ? `Task cancelled in session "${name}".`
+          : `No active task to cancel in session "${name}".`;
         this.publishEvent(sessionId, cancelContent);
         updateSessionStatus(this.db, sessionId, 'OPEN_IDLE');
         enqueueOutbox(this.db, 'send_message', { sessionId, content: cancelContent }, sessionId);

@@ -33,6 +33,7 @@ export interface SessionActorManagerOptions {
   utilityProvider?: string;
   utilityModel?: string;
   streaming?: boolean;
+  preferAPIKeyClaude?: boolean;
   apiUrl: string;
   apiKey: string;
   personasDir: string;
@@ -157,8 +158,8 @@ export class SessionActorManager {
   /**
    * Cancel the current task in a session (does not close the session).
    */
-  cancelCurrentTask(actor: SessionActor): void {
-    if (!actor.currentTask || !actor.worker) return;
+  cancelCurrentTask(actor: SessionActor): boolean {
+    if (!actor.currentTask || !actor.worker) return false;
 
     actor.currentTask.cancelRequested = true;
     actor.currentTask.cancelRequestedAt = new Date();
@@ -194,6 +195,8 @@ export class SessionActorManager {
         }, 3000);
       }
     }, 4000);
+
+    return true;
   }
 
   /**
@@ -296,6 +299,7 @@ export class SessionActorManager {
         utilityProvider: this.options.utilityProvider,
         utilityModel: this.options.utilityModel,
         streaming: this.options.streaming,
+        preferAPIKeyClaude: this.options.preferAPIKeyClaude,
         apiUrl: this.options.apiUrl,
         apiKey: this.options.apiKey,
         personasDir: this.options.personasDir,
@@ -415,7 +419,15 @@ export class SessionActorManager {
 
     // Handle control items inline
     if (item.type === 'CANCEL') {
-      this.cancelCurrentTask(actor);
+      const hadTask = this.cancelCurrentTask(actor);
+      if (!hadTask) {
+        // No active task to cancel — notify orchestrator so user gets feedback
+        this.options.onWorkerEvent(actor.sessionId, {
+          type: 'WORKER_TASK_CANCELLED',
+          taskId: '',
+          sessionId: actor.sessionId,
+        });
+      }
       return;
     }
     if (item.type === 'CLOSE_SESSION') {
