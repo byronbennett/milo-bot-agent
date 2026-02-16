@@ -74,20 +74,9 @@ export const startCommand = new Command('start')
 
       await orchestrator.start();
 
-      // Keep process running
+      // Keep process running — orchestrator registers its own
+      // SIGINT/SIGTERM handlers that call stop() then process.exit(0)
       logger.info('Agent is running. Press Ctrl+C to stop.');
-
-      // Orchestrator registers its own SIGINT/SIGTERM handlers,
-      // but add a fallback here for the CLI layer
-      process.on('SIGINT', async () => {
-        await orchestrator.stop();
-        process.exit(0);
-      });
-
-      process.on('SIGTERM', async () => {
-        await orchestrator.stop();
-        process.exit(0);
-      });
 
       // Keep alive
       setInterval(() => {}, 1000);

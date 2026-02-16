@@ -66,6 +66,7 @@ export interface ToolContext {
   projectsDir: string;
   sessionsDir: string;
   toolsDir: string;
+  skillsDir: string;
   currentSession?: string;
   currentProject?: string;
 }

@@ -22,6 +22,7 @@ export interface WorkerInitMessage {
     apiUrl: string;
     apiKey: string;
     personasDir: string;
+    skillsDir: string;
   };
 }
 

@@ -36,6 +36,7 @@ export interface SessionActorManagerOptions {
   apiUrl: string;
   apiKey: string;
   personasDir: string;
+  skillsDir: string;
   logger: Logger;
   onWorkerEvent: (sessionId: string, event: WorkerToOrchestrator) => void;
   onWorkerStateChange?: (sessionId: string, pid: number | null, state: WorkerState) => void;
@@ -298,6 +299,7 @@ export class SessionActorManager {
         apiUrl: this.options.apiUrl,
         apiKey: this.options.apiKey,
         personasDir: this.options.personasDir,
+        skillsDir: this.options.skillsDir,
       },
     });
 

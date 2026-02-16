@@ -17,9 +17,10 @@ export const defaultConfig: AgentConfig = {
   workspace: {
     baseDir: DEFAULT_WORKSPACE_DIR,
     projectsDir: 'projects',
-    sessionsDir: 'SESSION',
+    sessionsDir: 'SESSIONS',
     templatesDir: 'templates',
-    toolsDir: 'tools',
+    toolsDir: 'TOOLS',
+    skillsDir: 'SKILLS',
     personasDir: 'PERSONAS',
   },
   claudeCode: {

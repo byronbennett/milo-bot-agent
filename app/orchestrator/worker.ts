@@ -49,11 +49,13 @@ let currentModel: string | undefined;
 let apiUrl = '';
 let apiKey = '';
 let personasDir = '';
+let skillsDir = '';
 let streaming = false;
 let initConfig: WorkerInitMessage['config'] = {
   apiUrl: '',
   apiKey: '',
   personasDir: '',
+  skillsDir: '',
 };
 
 function send(msg: WorkerToOrchestrator): void {
@@ -73,6 +75,7 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   apiUrl = msg.config.apiUrl;
   apiKey = msg.config.apiKey;
   personasDir = msg.config.personasDir;
+  skillsDir = msg.config.skillsDir;
   streaming = msg.config.streaming ?? false;
 
   initialized = true;
@@ -116,6 +119,15 @@ Always use the notify_user tool to communicate important progress or results to 
   if (existsSync(memoryPath)) {
     const memory = readFileSync(memoryPath, 'utf-8');
     sections.push(`## User Preferences\n${memory}`);
+  }
+
+  // Load available skills
+  if (skillsDir) {
+    const { buildSkillsPromptSection } = await import('../skills/skills-registry.js');
+    const skillsSection = buildSkillsPromptSection(skillsDir);
+    if (skillsSection) {
+      sections.push(skillsSection);
+    }
   }
 
   const systemPrompt = sections.join('\n\n');
@@ -410,7 +422,12 @@ async function main(): Promise<void> {
         await handleInit(msg);
         break;
       case 'WORKER_TASK':
-        await handleTask(msg);
+        // Don't await — run in background so cancel/steer/answer messages
+        // can be processed while the task is executing
+        handleTask(msg).catch((err) => {
+          log(`Unhandled task error: ${err}`);
+          send({ type: 'WORKER_ERROR', sessionId, error: String(err), fatal: true });
+        });
         break;
       case 'WORKER_CANCEL':
         await handleCancel(msg);

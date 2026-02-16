@@ -31,10 +31,12 @@ export function enqueueOutbox(
   return result.lastInsertRowid as number;
 }
 
+const MAX_RETRIES = 5;
+
 export function getUnsent(db: Database.Database, limit = 20): OutboxRecord[] {
   return db.prepare(`
-    SELECT * FROM outbox WHERE sent = 0 ORDER BY created_at ASC LIMIT ?
-  `).all(limit) as OutboxRecord[];
+    SELECT * FROM outbox WHERE sent = 0 AND retries < ? ORDER BY created_at ASC LIMIT ?
+  `).all(MAX_RETRIES, limit) as OutboxRecord[];
 }
 
 export function markSent(db: Database.Database, id: number): void {

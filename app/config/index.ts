@@ -58,6 +58,14 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
       ai: {
         ...defaultConfig.ai,
         ...rawConfig.ai,
+        agent: {
+          ...defaultConfig.ai.agent,
+          ...rawConfig.ai?.agent,
+        },
+        utility: {
+          ...defaultConfig.ai.utility,
+          ...rawConfig.ai?.utility,
+        },
       },
       messaging: {
         ...defaultConfig.messaging,
@@ -72,6 +80,12 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
         },
       },
     });
+
+    // Propagate top-level ai.model to ai.agent.model when the user set
+    // the simple config but didn't explicitly provide the nested one
+    if (rawConfig.ai?.model && !rawConfig.ai?.agent?.model) {
+      config.ai.agent.model = config.ai.model;
+    }
 
     // Load .env file if exists
     loadEnvFile(config.workspace.baseDir);

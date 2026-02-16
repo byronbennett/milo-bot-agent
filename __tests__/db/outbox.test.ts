@@ -41,6 +41,16 @@ describe('outbox', () => {
     expect(unsent[0].last_error).toBe('timeout');
   });
 
+  test('items exceeding max retries are excluded from unsent', () => {
+    const id = enqueueOutbox(db, 'send_message', { content: 'hi' });
+    for (let i = 0; i < 5; i++) {
+      markFailed(db, id, `error ${i}`);
+    }
+
+    const unsent = getUnsent(db);
+    expect(unsent).toHaveLength(0);
+  });
+
   test('getUnsent respects limit', () => {
     for (let i = 0; i < 10; i++) {
       enqueueOutbox(db, 'send_message', { content: `msg-${i}` });

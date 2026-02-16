@@ -13,7 +13,7 @@ export const sessionsCommand = new Command('sessions')
   .action(async (options) => {
     const workspaceDir = options.dir.replace('~', homedir());
     const resolvedDir = resolve(workspaceDir);
-    const sessionsDir = join(resolvedDir, 'SESSION');
+    const sessionsDir = join(resolvedDir, 'SESSIONS');
     const archiveDir = join(sessionsDir, 'archive');
 
     console.log('');

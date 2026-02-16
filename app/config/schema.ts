@@ -7,9 +7,10 @@ import { z } from 'zod';
 export const workspaceConfigSchema = z.object({
   baseDir: z.string(),
   projectsDir: z.string().default('projects'),
-  sessionsDir: z.string().default('SESSION'),
+  sessionsDir: z.string().default('SESSIONS'),
   templatesDir: z.string().default('templates'),
-  toolsDir: z.string().default('tools'),
+  toolsDir: z.string().default('TOOLS'),
+  skillsDir: z.string().default('SKILLS'),
   personasDir: z.string().default('PERSONAS'),
 });
 

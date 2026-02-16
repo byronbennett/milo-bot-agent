@@ -714,7 +714,7 @@ export async function runInit(options: {
     mkdirSync(resolvedDir, { recursive: true });
 
     // Create directory structure
-    const dirs = ['SESSION', 'SESSION/archive', 'projects', 'templates', 'tools', 'logs', 'PERSONAS'];
+    const dirs = ['SESSIONS', 'SESSIONS/archive', 'projects', 'templates', 'TOOLS', 'SKILLS', 'logs', 'PERSONAS'];
     for (const dir of dirs) {
       mkdirSync(join(resolvedDir, dir), { recursive: true });
     }
@@ -799,7 +799,7 @@ dist/
     }
 
     // Create .gitkeep files
-    const gitkeepDirs = ['SESSION/archive', 'projects', 'tools', 'logs'];
+    const gitkeepDirs = ['SESSIONS/archive', 'projects', 'TOOLS', 'SKILLS', 'logs'];
     for (const dir of gitkeepDirs) {
       const gitkeepPath = join(resolvedDir, dir, '.gitkeep');
       if (!existsSync(gitkeepPath)) {
@@ -818,9 +818,10 @@ dist/
       workspace: {
         baseDir: resolvedDir,
         projectsDir: 'projects',
-        sessionsDir: 'SESSION',
+        sessionsDir: 'SESSIONS',
         templatesDir: 'templates',
-        toolsDir: 'tools',
+        toolsDir: 'TOOLS',
+        skillsDir: 'SKILLS',
         personasDir: 'PERSONAS',
       },
       claudeCode: {

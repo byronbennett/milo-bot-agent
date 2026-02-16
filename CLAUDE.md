@@ -63,7 +63,8 @@ ESM throughout (`"type": "module"`). TypeScript targets ES2022, bundled with tsu
 **Supporting modules:**
 - `config/` — Zod-validated config with `ai.agent` and `ai.utility` sub-configs for provider/model selection.
 - `db/` — SQLite via better-sqlite3 for inbox, outbox, and session persistence.
-- `session/` — Markdown-based session persistence in `~/milo-workspace/SESSION/`
+- `session/` — Markdown-based session persistence in `~/milo-workspace/SESSIONS/`
+- `skills/` — Skills registry. Scans workspace `SKILLS/` folder and builds system prompt addendum listing available skills for workers.
 - `scheduler/` — Heartbeat scheduling (default 3 min, 5s with PubNub).
 - `utils/ai-client.ts` — pi-ai wrapper for utility AI calls (intent parsing, prompt enhancement).
 - `utils/logger.ts` — Color-coded singleton logger with levels.

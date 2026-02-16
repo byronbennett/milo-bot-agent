@@ -93,6 +93,7 @@ export const MAX_AGENT_NAME_LENGTH = 100;
 
 export const DEFAULT_WORKSPACE_DIR = '~/milo-workspace';
 export const DEFAULT_PROJECTS_DIR = 'projects';
-export const DEFAULT_SESSIONS_DIR = 'SESSION';
+export const DEFAULT_SESSIONS_DIR = 'SESSIONS';
 export const DEFAULT_TEMPLATES_DIR = 'templates';
-export const DEFAULT_TOOLS_DIR = 'tools';
+export const DEFAULT_TOOLS_DIR = 'TOOLS';
+export const DEFAULT_SKILLS_DIR = 'SKILLS';

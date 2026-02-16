@@ -109,6 +109,7 @@ export class Orchestrator {
       apiUrl: this.config.messaging.webapp.apiUrl,
       apiKey: process.env.MILO_API_KEY || '',
       personasDir: join(this.config.workspace.baseDir, this.config.workspace.personasDir),
+      skillsDir: join(this.config.workspace.baseDir, this.config.workspace.skillsDir),
       logger: this.logger,
       onWorkerEvent: this.handleWorkerEvent.bind(this),
       onWorkerStateChange: (sessionId: string, pid: number | null, state: WorkerState) => {
@@ -264,9 +265,9 @@ export class Orchestrator {
     updateSessionStatus(this.db, sessionId, 'CLOSED');
     insertSessionMessage(this.db, sessionId, 'system', 'Session deleted by user');
 
-    // 3. Delete session file from SESSION directory
+    // 3. Delete session file from SESSIONS directory
     if (sessionName) {
-      const sessionsDir = join(this.config.workspace.baseDir, 'SESSION');
+      const sessionsDir = join(this.config.workspace.baseDir, this.config.workspace.sessionsDir);
       const sessionFile = join(sessionsDir, `${sessionName}.md`);
       try {
         if (existsSync(sessionFile)) {
@@ -662,8 +663,15 @@ export class Orchestrator {
         markSent(this.db, item.id);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        markFailed(this.db, item.id, error);
-        this.logger.debug(`Outbox item ${item.id} failed: ${error}`);
+        // Permanent failures (404 = session deleted, 401 = bad auth) — skip retries
+        const isPermanent = /API error \(40[134]\)/.test(error);
+        if (isPermanent) {
+          markSent(this.db, item.id); // Mark as "sent" to stop retrying
+          this.logger.debug(`Outbox item ${item.id} permanently failed (${error}), skipping`);
+        } else {
+          markFailed(this.db, item.id, error);
+          this.logger.debug(`Outbox item ${item.id} failed: ${error}`);
+        }
       }
     }
   }
