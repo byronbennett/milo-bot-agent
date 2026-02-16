@@ -17,6 +17,8 @@ const SERVICE_NAME = 'milo-bot';
 /** Well-known account names */
 const ACCOUNT_MILO_KEY = 'api-key';
 const ACCOUNT_ANTHROPIC_KEY = 'anthropic-api-key';
+const ACCOUNT_OPENAI_KEY = 'openai-api-key';
+const ACCOUNT_GEMINI_KEY = 'gemini-api-key';
 
 /** Per-account in-memory cache so repeated loads don't spawn subprocesses */
 const cache = new Map<string, string | null>();
@@ -283,6 +285,38 @@ export async function loadAnthropicKey(): Promise<string | null> {
 
 export async function deleteAnthropicKey(): Promise<void> {
   return deleteCredential(ACCOUNT_ANTHROPIC_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// OPENAI_API_KEY helpers
+// ---------------------------------------------------------------------------
+
+export async function saveOpenAIKey(key: string): Promise<void> {
+  return saveCredential(ACCOUNT_OPENAI_KEY, key);
+}
+
+export async function loadOpenAIKey(): Promise<string | null> {
+  return loadCredential(ACCOUNT_OPENAI_KEY);
+}
+
+export async function deleteOpenAIKey(): Promise<void> {
+  return deleteCredential(ACCOUNT_OPENAI_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// GEMINI_API_KEY helpers
+// ---------------------------------------------------------------------------
+
+export async function saveGeminiKey(key: string): Promise<void> {
+  return saveCredential(ACCOUNT_GEMINI_KEY, key);
+}
+
+export async function loadGeminiKey(): Promise<string | null> {
+  return loadCredential(ACCOUNT_GEMINI_KEY);
+}
+
+export async function deleteGeminiKey(): Promise<void> {
+  return deleteCredential(ACCOUNT_GEMINI_KEY);
 }
 
 // ---------------------------------------------------------------------------

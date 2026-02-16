@@ -12,13 +12,16 @@ export interface WorkerInitMessage {
   sessionType: 'chat' | 'bot';
   projectPath: string;
   workspaceDir: string;
-  persona?: string;
   config: {
     agentProvider?: string;
     agentModel?: string;
     utilityProvider?: string;
     utilityModel?: string;
     toolSet?: string;
+    streaming?: boolean;
+    apiUrl: string;
+    apiKey: string;
+    personasDir: string;
   };
 }
 
@@ -27,6 +30,9 @@ export interface WorkerTaskMessage {
   taskId: string;
   userEventId: string;
   prompt: string;
+  personaId?: string;
+  personaVersionId?: string;
+  model?: string;
   context?: {
     chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     sessionName?: string;

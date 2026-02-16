@@ -101,6 +101,35 @@ describe('IPC helpers', () => {
     expect(messages[0].type).toBe('WORKER_STEER');
   });
 
+  test('WORKER_TASK with persona fields can be sent and received', async () => {
+    const stream = new PassThrough();
+
+    const msg: IPCMessage = {
+      type: 'WORKER_TASK',
+      taskId: 't1',
+      userEventId: 'evt-1',
+      prompt: 'Fix the login bug',
+      personaId: 'persona-abc',
+      personaVersionId: 'v3',
+      model: 'claude-sonnet-4-20250514',
+    };
+
+    sendIPC(stream, msg);
+    stream.end();
+
+    const messages: IPCMessage[] = [];
+    for await (const m of readIPC(stream)) {
+      messages.push(m);
+    }
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual(msg);
+    const task = messages[0] as import('../../app/orchestrator/ipc-types.js').WorkerTaskMessage;
+    expect(task.personaId).toBe('persona-abc');
+    expect(task.personaVersionId).toBe('v3');
+    expect(task.model).toBe('claude-sonnet-4-20250514');
+  });
+
   test('readIPC handles chunked data across line boundaries', async () => {
     const stream = new PassThrough();
     const msg: IPCMessage = { type: 'WORKER_READY', sessionId: 's1', pid: 1 };

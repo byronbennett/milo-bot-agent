@@ -7,7 +7,9 @@ import { homedir } from 'os';
 import { Logger } from '../utils/logger';
 import {
   saveApiKey, loadApiKey,
-  saveAnthropicKey, loadAnthropicKey,
+  saveAnthropicKey, loadAnthropicKey, deleteAnthropicKey,
+  saveOpenAIKey, loadOpenAIKey, deleteOpenAIKey,
+  saveGeminiKey, loadGeminiKey, deleteGeminiKey,
   isKeychainAvailable,
 } from '../utils/keychain';
 
@@ -15,6 +17,8 @@ const logger = new Logger({ prefix: '[init]' });
 
 const API_KEY_PATTERN = /^milo_[a-zA-Z0-9]+$/;
 const ANTHROPIC_KEY_PATTERN = /^sk-ant-[a-zA-Z0-9_-]+$/;
+const OPENAI_KEY_PATTERN = /^sk-/;
+const GEMINI_KEY_PATTERN = /^AIza/;
 
 const DEFAULT_AI_MODEL = 'claude-sonnet-4-5';
 
@@ -30,6 +34,22 @@ function validateAnthropicKey(value: string): boolean | string {
   if (!value.trim()) return 'API key is required';
   if (!ANTHROPIC_KEY_PATTERN.test(value.trim())) {
     return 'Invalid Anthropic API key format. Keys start with "sk-ant-"';
+  }
+  return true;
+}
+
+function validateOpenAIKey(value: string): boolean | string {
+  if (!value.trim()) return 'API key is required';
+  if (!OPENAI_KEY_PATTERN.test(value.trim())) {
+    return 'Invalid OpenAI API key format. Keys start with "sk-"';
+  }
+  return true;
+}
+
+function validateGeminiKey(value: string): boolean | string {
+  if (!value.trim()) return 'API key is required';
+  if (!GEMINI_KEY_PATTERN.test(value.trim())) {
+    return 'Invalid Gemini API key format. Keys start with "AIza"';
   }
   return true;
 }
@@ -58,6 +78,10 @@ interface ExistingState {
   apiKeySource: KeySource;
   anthropicKey: string | null;
   anthropicKeySource: KeySource;
+  openaiKey: string | null;
+  openaiKeySource: KeySource;
+  geminiKey: string | null;
+  geminiKeySource: KeySource;
 }
 
 /**
@@ -69,6 +93,10 @@ async function loadExisting(dir: string): Promise<ExistingState> {
   let apiKeySource: KeySource = null;
   let anthropicKey: string | null = null;
   let anthropicKeySource: KeySource = null;
+  let openaiKey: string | null = null;
+  let openaiKeySource: KeySource = null;
+  let geminiKey: string | null = null;
+  let geminiKeySource: KeySource = null;
 
   const configPath = join(dir, 'config.json');
   if (existsSync(configPath)) {
@@ -79,7 +107,7 @@ async function loadExisting(dir: string): Promise<ExistingState> {
     }
   }
 
-  // Try keychain first for both keys
+  // Try keychain first for all keys
   try {
     const keychainKey = await loadApiKey();
     if (keychainKey) {
@@ -95,6 +123,26 @@ async function loadExisting(dir: string): Promise<ExistingState> {
     if (keychainKey) {
       anthropicKey = keychainKey;
       anthropicKeySource = 'keychain';
+    }
+  } catch {
+    // Keychain unavailable
+  }
+
+  try {
+    const keychainKey = await loadOpenAIKey();
+    if (keychainKey) {
+      openaiKey = keychainKey;
+      openaiKeySource = 'keychain';
+    }
+  } catch {
+    // Keychain unavailable
+  }
+
+  try {
+    const keychainKey = await loadGeminiKey();
+    if (keychainKey) {
+      geminiKey = keychainKey;
+      geminiKeySource = 'keychain';
     }
   } catch {
     // Keychain unavailable
@@ -121,12 +169,31 @@ async function loadExisting(dir: string): Promise<ExistingState> {
           anthropicKeySource = 'env';
         }
       }
+
+      if (!openaiKey) {
+        const match = content.match(/^OPENAI_API_KEY=(.+)$/m);
+        if (match && match[1].trim()) {
+          openaiKey = match[1].trim();
+          openaiKeySource = 'env';
+        }
+      }
+
+      if (!geminiKey) {
+        const match = content.match(/^GEMINI_API_KEY=(.+)$/m);
+        if (match && match[1].trim()) {
+          geminiKey = match[1].trim();
+          geminiKeySource = 'env';
+        }
+      }
     } catch {
       // Ignore read errors
     }
   }
 
-  return { config, apiKey, apiKeySource, anthropicKey, anthropicKeySource };
+  return {
+    config, apiKey, apiKeySource, anthropicKey, anthropicKeySource,
+    openaiKey, openaiKeySource, geminiKey, geminiKeySource,
+  };
 }
 
 function maskKey(key: string): string {
@@ -144,12 +211,16 @@ async function promptForKey(opts: {
   existingSource: KeySource;
   validate: (v: string) => boolean | string;
   save: (k: string) => Promise<void>;
+  /** Delete from keychain. Required when required=false to support removal. */
+  deleteFromKeychain?: () => Promise<void>;
   envName: string;
   resolvedDir: string;
   isInteractive: boolean;
   cliValue?: string;
+  /** When false, allows the user to skip entering or remove the key. Defaults to true. */
+  required?: boolean;
 }): Promise<string | undefined> {
-  const { label, existingKey, existingSource, validate, save, envName, resolvedDir, isInteractive, cliValue } = opts;
+  const { label, existingKey, existingSource, validate, save, deleteFromKeychain, envName, resolvedDir, isInteractive, cliValue, required = true } = opts;
 
   // CLI flag takes precedence
   if (cliValue) {
@@ -165,6 +236,63 @@ async function promptForKey(opts: {
 
   if (existingKey) {
     const sourceLabel = existingSource === 'keychain' ? ' (system keychain)' : ' (.env file)';
+
+    // Optional keys: offer Keep / Change / Remove
+    if (!required) {
+      const action = await select({
+        message: `${label} is set${sourceLabel} (${maskKey(existingKey)}).`,
+        choices: [
+          { name: 'Keep current key', value: 'keep' as const },
+          { name: 'Change key', value: 'change' as const },
+          { name: 'Remove key', value: 'remove' as const },
+        ],
+        default: 'keep' as const,
+      });
+
+      if (action === 'remove') {
+        // Remove from keychain if stored there
+        if (existingSource === 'keychain' && deleteFromKeychain) {
+          try {
+            await deleteFromKeychain();
+          } catch (err) {
+            logger.warn(`Failed to remove from keychain: ${err}`);
+          }
+        }
+        // Remove from .env
+        removeEnvVar(resolvedDir, envName);
+        console.log(`   ${label} removed`);
+        return undefined;
+      }
+
+      if (action === 'change') {
+        let newKey = await input({ message: `Enter your new ${label}:`, validate });
+        return newKey.trim();
+      }
+
+      // Keep — offer migration if in .env
+      if (existingSource === 'env') {
+        const keychainOk = await isKeychainAvailable();
+        if (keychainOk) {
+          const migrate = await confirm({
+            message: `Migrate ${label} from .env to system keychain (more secure)?`,
+            default: true,
+          });
+          if (migrate) {
+            try {
+              await save(existingKey);
+              removeEnvVar(resolvedDir, envName);
+              console.log(`🔑 ${label} migrated to system keychain`);
+            } catch (err) {
+              logger.warn(`Failed to migrate to keychain: ${err}`);
+            }
+          }
+        }
+      }
+
+      return existingKey;
+    }
+
+    // Required keys: simple Change? confirm
     const changeKey = await confirm({
       message: `${label} already set${sourceLabel} (${maskKey(existingKey)}). Change it?`,
       default: false,
@@ -186,7 +314,6 @@ async function promptForKey(opts: {
         if (migrate) {
           try {
             await save(existingKey);
-            // Remove this key from .env (rewrite without it)
             removeEnvVar(resolvedDir, envName);
             console.log(`🔑 ${label} migrated to system keychain`);
           } catch (err) {
@@ -199,7 +326,15 @@ async function promptForKey(opts: {
     return existingKey;
   }
 
-  // No existing key — ask the user
+  // No existing key — if optional, let the user skip
+  if (!required) {
+    const wantKey = await confirm({
+      message: `Do you want to add a ${label}?`,
+      default: false,
+    });
+    if (!wantKey) return undefined;
+  }
+
   let newKey = await input({ message: `Enter your ${label}:`, validate });
   return newKey.trim();
 }
@@ -285,6 +420,8 @@ function extractServerUrl(apiUrl: string): string {
 export async function runInit(options: {
   apiKey?: string;
   anthropicKey?: string;
+  openaiKey?: string;
+  geminiKey?: string;
   aiModel?: string;
   dir?: string;
   name?: string;
@@ -319,6 +456,8 @@ export async function runInit(options: {
     let existing: ExistingState = {
       config: null, apiKey: null, apiKeySource: null,
       anthropicKey: null, anthropicKeySource: null,
+      openaiKey: null, openaiKeySource: null,
+      geminiKey: null, geminiKeySource: null,
     };
 
     if (isReinit) {
@@ -430,51 +569,103 @@ export async function runInit(options: {
     }
 
     // -----------------------------------------------------------------------
-    // Anthropic API key (for Milo AI features — NOT Claude Code)
+    // AI Provider API Keys
     // -----------------------------------------------------------------------
     console.log('');
-    console.log('🧠 Milo AI Configuration');
-    console.log('   Milo uses an Anthropic API key for intent parsing, prompt');
-    console.log('   enhancement, and auto-answer. This is separate from Claude');
-    console.log('   Code — configure Claude Code to use your Claude subscription or');
-    console.log('   its own API key via `claude` CLI.');
+    console.log('🧠 AI Provider API Keys');
+    console.log('   MiloBot can use models from Anthropic, OpenAI, and Google.');
+    console.log('   At least one provider key is needed for AI features (intent');
+    console.log('   parsing, prompt enhancement, auto-answer, and agent tasks).');
     console.log('');
-    console.log('   Important: Using the Anthropic API incurs costs based on token');
-    console.log('   usage. MiloBot is designed to use tokens sparingly, but there');
-    console.log('   will be a cost. By providing your API key, you accept');
-    console.log('   responsibility for any charges. MiloBot only sends your API key');
-    console.log('   to Anthropic as part of API requests — it is never shared with');
+    console.log('   Important: Using these APIs incurs costs based on token usage.');
+    console.log('   MiloBot is designed to use tokens sparingly, but there will be');
+    console.log('   a cost. By providing your API keys, you accept responsibility');
+    console.log('   for any charges. Your keys are only sent to their respective');
+    console.log('   providers as part of API requests — they are never shared with');
     console.log('   any other service.');
-    console.log('');
-    console.log('   Get an API key: https://console.anthropic.com/settings/keys');
     console.log('');
 
     let anthropicKey: string | undefined;
+    let openaiKey: string | undefined;
+    let geminiKey: string | undefined;
 
-    // For new setups (no existing key, no CLI flag), require explicit acceptance
+    // For new setups (no existing keys, no CLI flags), require explicit acceptance
+    const hasAnyExistingProviderKey = existing.anthropicKey || existing.openaiKey || existing.geminiKey;
+    const hasAnyCliProviderKey = options.anthropicKey || options.openaiKey || options.geminiKey;
     let acceptedTerms = true;
-    if (isInteractive && !existing.anthropicKey && !options.anthropicKey) {
+    if (isInteractive && !hasAnyExistingProviderKey && !hasAnyCliProviderKey) {
       acceptedTerms = await confirm({
-        message: 'I understand that Anthropic API usage incurs costs and accept this term.',
+        message: 'I understand that AI API usage incurs costs and accept this term.',
         default: true,
       });
       if (!acceptedTerms) {
         console.log('');
-        console.log('   Skipping Anthropic API key setup. You can add it later with `milo init`.');
+        console.log('   Skipping AI provider key setup. You can add keys later with `milo init`.');
       }
     }
 
     if (acceptedTerms) {
+      // --- Anthropic ---
+      console.log('');
+      console.log('🔑 Anthropic API Key (optional)');
+      console.log('   Enables Claude models for agent tasks.');
+      console.log('   Get an API key: https://console.anthropic.com/settings/keys');
+      console.log('');
+
       anthropicKey = await promptForKey({
         label: 'Anthropic API key',
         existingKey: existing.anthropicKey,
         existingSource: existing.anthropicKeySource,
         validate: validateAnthropicKey,
         save: saveAnthropicKey,
+        deleteFromKeychain: deleteAnthropicKey,
         envName: 'ANTHROPIC_API_KEY',
         resolvedDir,
         isInteractive,
         cliValue: options.anthropicKey,
+        required: false,
+      });
+
+      // --- OpenAI ---
+      console.log('');
+      console.log('🔑 OpenAI API Key (optional)');
+      console.log('   Enables OpenAI models (GPT-4, o1, etc.) for agent tasks.');
+      console.log('   Get an API key: https://platform.openai.com/api-keys');
+      console.log('');
+
+      openaiKey = await promptForKey({
+        label: 'OpenAI API key',
+        existingKey: existing.openaiKey,
+        existingSource: existing.openaiKeySource,
+        validate: validateOpenAIKey,
+        save: saveOpenAIKey,
+        deleteFromKeychain: deleteOpenAIKey,
+        envName: 'OPENAI_API_KEY',
+        resolvedDir,
+        isInteractive,
+        cliValue: options.openaiKey,
+        required: false,
+      });
+
+      // --- Gemini ---
+      console.log('');
+      console.log('🔑 Gemini API Key (optional)');
+      console.log('   Enables Google Gemini models for agent tasks.');
+      console.log('   Get an API key: https://aistudio.google.com/apikey');
+      console.log('');
+
+      geminiKey = await promptForKey({
+        label: 'Gemini API key',
+        existingKey: existing.geminiKey,
+        existingSource: existing.geminiKeySource,
+        validate: validateGeminiKey,
+        save: saveGeminiKey,
+        deleteFromKeychain: deleteGeminiKey,
+        envName: 'GEMINI_API_KEY',
+        resolvedDir,
+        isInteractive,
+        cliValue: options.geminiKey,
+        required: false,
       });
     }
 
@@ -523,7 +714,7 @@ export async function runInit(options: {
     mkdirSync(resolvedDir, { recursive: true });
 
     // Create directory structure
-    const dirs = ['SESSION', 'SESSION/archive', 'projects', 'templates', 'tools', 'logs'];
+    const dirs = ['SESSION', 'SESSION/archive', 'projects', 'templates', 'tools', 'logs', 'PERSONAS'];
     for (const dir of dirs) {
       mkdirSync(join(resolvedDir, dir), { recursive: true });
     }
@@ -630,6 +821,7 @@ dist/
         sessionsDir: 'SESSION',
         templatesDir: 'templates',
         toolsDir: 'tools',
+        personasDir: 'PERSONAS',
       },
       claudeCode: {
         maxConcurrentSessions: 3,
@@ -693,6 +885,26 @@ dist/
       });
     }
 
+    if (openaiKey) {
+      await saveSecret({
+        key: openaiKey,
+        save: saveOpenAIKey,
+        envName: 'OPENAI_API_KEY',
+        resolvedDir,
+        label: 'OpenAI API key',
+      });
+    }
+
+    if (geminiKey) {
+      await saveSecret({
+        key: geminiKey,
+        save: saveGeminiKey,
+        envName: 'GEMINI_API_KEY',
+        resolvedDir,
+        label: 'Gemini API key',
+      });
+    }
+
     // Write config
     writeFileSync(configPath, JSON.stringify(config, null, 2));
 
@@ -725,6 +937,8 @@ export const initCommand = new Command('init')
   .description('Initialize MiloBot agent workspace')
   .option('-k, --api-key <key>', 'API key from milobot.dev')
   .option('--anthropic-key <key>', 'Anthropic API key for Milo AI features')
+  .option('--openai-key <key>', 'OpenAI API key (enables GPT models)')
+  .option('--gemini-key <key>', 'Gemini API key (enables Google Gemini models)')
   .option('--ai-model <model>', 'Model for Milo AI calls (not Claude Code)')
   .option('-d, --dir <directory>', 'Workspace directory')
   .option('-n, --name <name>', 'Agent name')

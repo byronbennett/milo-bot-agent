@@ -3,7 +3,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { agentConfigSchema, type AgentConfig } from './schema';
 import { defaultConfig, getDefaultConfigPath } from './defaults';
-import { loadApiKey, loadAnthropicKey } from '../utils/keychain';
+import { loadApiKey, loadAnthropicKey, loadOpenAIKey, loadGeminiKey } from '../utils/keychain';
 import { initUtilityModel } from '../utils/ai-client';
 
 export type { AgentConfig } from './schema';
@@ -94,6 +94,30 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
         const keychainKey = await loadAnthropicKey();
         if (keychainKey) {
           process.env.ANTHROPIC_API_KEY = keychainKey;
+        }
+      } catch {
+        // Keychain unavailable, continue without it
+      }
+    }
+
+    // If OPENAI_API_KEY still not set, try the OS keychain
+    if (!process.env.OPENAI_API_KEY) {
+      try {
+        const keychainKey = await loadOpenAIKey();
+        if (keychainKey) {
+          process.env.OPENAI_API_KEY = keychainKey;
+        }
+      } catch {
+        // Keychain unavailable, continue without it
+      }
+    }
+
+    // If GEMINI_API_KEY still not set, try the OS keychain
+    if (!process.env.GEMINI_API_KEY) {
+      try {
+        const keychainKey = await loadGeminiKey();
+        if (keychainKey) {
+          process.env.GEMINI_API_KEY = keychainKey;
         }
       } catch {
         // Keychain unavailable, continue without it

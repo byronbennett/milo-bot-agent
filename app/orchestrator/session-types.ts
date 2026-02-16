@@ -17,7 +17,8 @@ export type WorkItemType =
   | 'USER_MESSAGE'
   | 'CANCEL'
   | 'CLOSE_SESSION'
-  | 'STATUS_REQUEST';
+  | 'STATUS_REQUEST'
+  | 'LIST_MODELS';
 
 export interface WorkItem {
   id: string;
@@ -26,6 +27,9 @@ export interface WorkItem {
   sessionId: string;
   content: string;
   priority: 'high' | 'normal';
+  personaId?: string;
+  personaVersionId?: string;
+  model?: string;
   createdAt: Date;
 }
 
@@ -54,8 +58,6 @@ export interface SessionActor {
   queueHigh: WorkItem[];
   queueNormal: WorkItem[];
   projectPath: string;
-  persona?: string;
-  model?: string;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -10,6 +10,7 @@ export const workspaceConfigSchema = z.object({
   sessionsDir: z.string().default('SESSION'),
   templatesDir: z.string().default('templates'),
   toolsDir: z.string().default('tools'),
+  personasDir: z.string().default('PERSONAS'),
 });
 
 export const claudeCodeConfigSchema = z.object({
@@ -85,6 +86,7 @@ export const agentConfigSchema = z.object({
   ai: aiConfigSchema.default({}),
   messaging: messagingConfigSchema.default({}),
   pubnub: pubnubConfigSchema.default({}),
+  streaming: z.boolean().default(true),
   onboardingComplete: z.boolean().default(false),
 });
 

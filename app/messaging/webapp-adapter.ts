@@ -106,4 +106,13 @@ export class WebAppAdapter implements MessagingAdapter {
   ): Promise<void> {
     await this.request('PATCH', `/sessions/${sessionId}`, updates);
   }
+
+  /**
+   * Sync available AI models to the web app database
+   */
+  async syncModels(
+    models: Array<{ provider: string; modelId: string; displayName: string }>
+  ): Promise<void> {
+    await this.request('POST', '/agent/models', { models });
+  }
 }

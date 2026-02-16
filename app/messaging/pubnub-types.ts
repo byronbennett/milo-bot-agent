@@ -13,7 +13,8 @@ export interface PubNubCommandMessage {
   sessionName?: string;
   content: string;
   uiAction?: string;
-  persona?: string;
+  personaId?: string;
+  personaVersionId?: string;
   model?: string;
   timestamp: string;
 }
@@ -30,6 +31,7 @@ export type PubNubEventType =
   | 'agent_status'
   | 'message_received'
   | 'session_status_changed'
+  | 'models_list'
   | 'subagent_started'
   | 'subagent_stopped'
   | 'subagent_output'
@@ -58,6 +60,14 @@ export interface PubNubEventMessage {
   errorMessage?: string;
   /** Worker PID for subagent lifecycle events */
   workerPid?: number;
+  /** Structured model list for models_list events */
+  models?: {
+    defaultModel?: string;
+    providers: Array<{
+      provider: string;
+      models: Array<{ id: string; name: string }>;
+    }>;
+  };
   timestamp: string;
 }
 

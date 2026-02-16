@@ -20,6 +20,7 @@ export const defaultConfig: AgentConfig = {
     sessionsDir: 'SESSION',
     templatesDir: 'templates',
     toolsDir: 'tools',
+    personasDir: 'PERSONAS',
   },
   claudeCode: {
     maxConcurrentSessions: 3,
@@ -61,6 +62,7 @@ export const defaultConfig: AgentConfig = {
   pubnub: {
     enabled: true,
   },
+  streaming: true,
   onboardingComplete: false,
 };
 

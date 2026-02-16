@@ -31,6 +31,7 @@ import type { WorkerToOrchestrator } from './ipc-types.js';
 import type { WorkItem, WorkItemType, WorkerState } from './session-types.js';
 import { HeartbeatScheduler } from '../scheduler/heartbeat.js';
 import { Logger, logger } from '../utils/logger.js';
+import { getProviders, getModels, getEnvApiKey, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
 import type Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -102,6 +103,10 @@ export class Orchestrator {
       agentModel: this.config.ai.agent.model,
       utilityProvider: this.config.ai.utility.provider,
       utilityModel: this.config.ai.utility.model,
+      streaming: this.config.streaming,
+      apiUrl: this.config.messaging.webapp.apiUrl,
+      apiKey: process.env.MILO_API_KEY || '',
+      personasDir: join(this.config.workspace.baseDir, this.config.workspace.personasDir),
       logger: this.logger,
       onWorkerEvent: this.handleWorkerEvent.bind(this),
       onWorkerStateChange: (sessionId: string, pid: number | null, state: WorkerState) => {
@@ -109,10 +114,11 @@ export class Orchestrator {
       },
     });
 
-    // 3. Verify connection
+    // 3. Verify connection and sync models
     try {
       const hb = await this.restAdapter.sendHeartbeat();
       this.logger.info(`Connected as agent: ${hb.agentId}`);
+      await this.syncModelsToServer();
     } catch (err) {
       this.logger.warn('Could not reach server, will retry:', err);
     }
@@ -306,18 +312,23 @@ export class Orchestrator {
     // Derive work item type
     const workItemType = this.deriveWorkItemType(message);
 
+    // LIST_MODELS doesn't need a session/worker — handle inline
+    if (workItemType === 'LIST_MODELS') {
+      const { text, structured } = this.getAvailableModels();
+      this.publishModelsList(message.sessionId, structured, text);
+      enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: text }, message.sessionId);
+      this.syncModelsToServer();
+      return;
+    }
+
     // Determine project path
     const projectPath = this.config.workspace.baseDir;
 
     // Get or create actor (spawns worker if needed)
-    // Persona and model from the message are only used when creating a new session.
-    // Once a session exists, its persona/model are fixed for its lifetime.
     const actor = await this.actorManager.getOrCreate(message.sessionId, {
       sessionName: message.sessionName ?? message.sessionId,
       sessionType: (message.sessionType as 'chat' | 'bot') || 'bot',
       projectPath,
-      persona: message.persona,
-      model: message.model,
     });
 
     // If the actor is busy with a task and this is a normal message, steer instead of queue
@@ -338,7 +349,7 @@ export class Orchestrator {
     }
 
     // Enqueue work item
-    const isControl = ['CANCEL', 'CLOSE_SESSION', 'STATUS_REQUEST'].includes(workItemType);
+    const isControl = ['CANCEL', 'CLOSE_SESSION', 'STATUS_REQUEST', 'LIST_MODELS'].includes(workItemType);
     const workItem: WorkItem = {
       id: `wi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: workItemType,
@@ -346,6 +357,9 @@ export class Orchestrator {
       sessionId: message.sessionId,
       content: message.content,
       priority: isControl ? 'high' : 'normal',
+      personaId: message.personaId,
+      personaVersionId: message.personaVersionId,
+      model: message.model,
       createdAt: new Date(),
     };
 
@@ -358,11 +372,15 @@ export class Orchestrator {
    * UI actions take precedence, then pattern matching.
    */
   private deriveWorkItemType(message: PendingMessage): WorkItemType {
+    // UI actions take precedence
+    if (message.uiAction === 'list_models') return 'LIST_MODELS';
+
     const lower = message.content.toLowerCase().trim();
 
     if (lower === 'cancel' || lower === '/cancel') return 'CANCEL';
     if (lower === 'close' || lower === '/close' || lower === 'close session') return 'CLOSE_SESSION';
     if (lower === 'status' || lower === '/status') return 'STATUS_REQUEST';
+    if (lower === '/models' || lower === 'models') return 'LIST_MODELS';
 
     // Default: user message (the worker handles the specifics)
     return 'USER_MESSAGE';
@@ -436,8 +454,10 @@ export class Orchestrator {
         break;
 
       case 'WORKER_STREAM_TEXT':
-        // Real-time text streaming — publish to user via PubNub
-        this.publishEvent(sessionId, event.delta);
+        // Real-time text streaming — publish to user via PubNub (if enabled)
+        if (this.config.streaming) {
+          this.publishEvent(sessionId, event.delta);
+        }
         break;
 
       case 'WORKER_TOOL_START':
@@ -460,6 +480,79 @@ export class Orchestrator {
     }
   }
 
+  // --- Models ---
+
+  /**
+   * Get available models as both formatted text and structured data.
+   */
+  private getAvailableModels(): {
+    text: string;
+    structured: {
+      defaultModel?: string;
+      providers: Array<{ provider: string; models: Array<{ id: string; name: string }> }>;
+    };
+  } {
+    registerBuiltInApiProviders();
+    const allProviders = getProviders();
+    const lines: string[] = ['Available Models:'];
+
+    const defaultModel = this.config.ai.agent.model || this.config.ai.utility.model;
+    if (defaultModel) {
+      lines.push(`\nDefault model: ${defaultModel}`);
+    }
+
+    const structuredProviders: Array<{ provider: string; models: Array<{ id: string; name: string }> }> = [];
+
+    for (const provider of allProviders) {
+      const envKey = getEnvApiKey(provider);
+      if (!envKey) continue;
+
+      try {
+        const models = getModels(provider);
+        if (models.length === 0) continue;
+
+        lines.push(`\n${provider}:`);
+        const providerModels: Array<{ id: string; name: string }> = [];
+        for (const model of models) {
+          lines.push(`  - ${model.name} (${model.id})`);
+          providerModels.push({ id: model.id, name: model.name });
+        }
+        structuredProviders.push({ provider, models: providerModels });
+      } catch {
+        // Skip providers that fail
+      }
+    }
+
+    if (structuredProviders.length === 0) {
+      lines.push('\nNo API keys configured. Run `milo init` to add provider keys.');
+    }
+
+    return {
+      text: lines.join('\n'),
+      structured: {
+        defaultModel: defaultModel || undefined,
+        providers: structuredProviders,
+      },
+    };
+  }
+
+  /**
+   * Sync available models to the web app database so the UI can display them after page refresh.
+   * Fire-and-forget — failures are logged but don't block the caller.
+   */
+  private syncModelsToServer(): void {
+    const { structured } = this.getAvailableModels();
+    const models = structured.providers.flatMap((p) =>
+      p.models.map((m) => ({ provider: p.provider, modelId: m.id, displayName: m.name }))
+    );
+
+    this.restAdapter.syncModels(models).then(() => {
+      this.logger.verbose(`Synced ${models.length} models to server`);
+    }).catch((err) => {
+      this.logger.warn('Failed to sync models to server:', err);
+    });
+  }
+
   // --- Publishing ---
 
   /**
@@ -469,6 +562,21 @@ export class Orchestrator {
     if (this.pubnubAdapter?.isConnected) {
       this.pubnubAdapter.sendMessage(content, sessionId).catch((err) => {
         this.logger.warn('PubNub publish failed:', err);
+      });
+    }
+  }
+
+  /**
+   * Publish a structured models list to the user via PubNub.
+   */
+  private publishModelsList(
+    sessionId: string,
+    models: { defaultModel?: string; providers: Array<{ provider: string; models: Array<{ id: string; name: string }> }> },
+    text: string,
+  ): void {
+    if (this.pubnubAdapter?.isConnected) {
+      this.pubnubAdapter.publishModelsList(sessionId, models, text).catch((err) => {
+        this.logger.warn('PubNub models list publish failed:', err);
       });
     }
   }

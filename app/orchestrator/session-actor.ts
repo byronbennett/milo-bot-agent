@@ -32,6 +32,10 @@ export interface SessionActorManagerOptions {
   agentModel?: string;
   utilityProvider?: string;
   utilityModel?: string;
+  streaming?: boolean;
+  apiUrl: string;
+  apiKey: string;
+  personasDir: string;
   logger: Logger;
   onWorkerEvent: (sessionId: string, event: WorkerToOrchestrator) => void;
   onWorkerStateChange?: (sessionId: string, pid: number | null, state: WorkerState) => void;
@@ -54,8 +58,6 @@ export class SessionActorManager {
     sessionName: string;
     sessionType: 'chat' | 'bot';
     projectPath: string;
-    persona?: string;
-    model?: string;
   }): Promise<SessionActor> {
     let actor = this.actors.get(sessionId);
 
@@ -70,8 +72,6 @@ export class SessionActorManager {
         queueHigh: [],
         queueNormal: [],
         projectPath: meta.projectPath,
-        persona: meta.persona,
-        model: meta.model,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -267,9 +267,9 @@ export class SessionActorManager {
     };
     this.options.onWorkerStateChange?.(actor.sessionId, workerPid, 'starting');
 
-    // Pipe stderr to our logger
+    // Pipe stderr to our logger (verbose so worker diagnostics are visible)
     child.stderr?.on('data', (data: Buffer) => {
-      this.logger.debug(`[worker:${actor.sessionId}] ${data.toString().trim()}`);
+      this.logger.verbose(`[worker:${actor.sessionId}] ${data.toString().trim()}`);
     });
 
     // Listen for IPC messages from worker stdout
@@ -289,12 +289,15 @@ export class SessionActorManager {
       sessionType: actor.sessionType,
       projectPath: actor.projectPath,
       workspaceDir: this.options.workspaceDir,
-      persona: actor.persona,
       config: {
         agentProvider: this.options.agentProvider,
-        agentModel: actor.model ?? this.options.agentModel,
+        agentModel: this.options.agentModel,
         utilityProvider: this.options.utilityProvider,
         utilityModel: this.options.utilityModel,
+        streaming: this.options.streaming,
+        apiUrl: this.options.apiUrl,
+        apiKey: this.options.apiKey,
+        personasDir: this.options.personasDir,
       },
     });
 
@@ -427,6 +430,11 @@ export class SessionActorManager {
       this.tryDispatch(actor); // continue to next item
       return;
     }
+    if (item.type === 'LIST_MODELS') {
+      // Handled by orchestrator before reaching here, but short-circuit if it does
+      this.tryDispatch(actor);
+      return;
+    }
 
     // USER_MESSAGE → dispatch as task
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -442,6 +450,9 @@ export class SessionActorManager {
       taskId,
       userEventId: item.eventId,
       prompt: item.content,
+      personaId: item.personaId,
+      personaVersionId: item.personaVersionId,
+      model: item.model,
     });
   }
 

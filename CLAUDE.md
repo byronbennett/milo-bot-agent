@@ -55,8 +55,8 @@ ESM throughout (`"type": "module"`). TypeScript targets ES2022, bundled with tsu
 
 **Core modules:**
 1. `messaging/` — Adapter pattern: `WebAppAdapter` (REST polling) and `PubNubAdapter` (real-time pub/sub).
-2. `intent/` — Parses user text into structured `ParsedIntent`. Regex patterns first (`patterns.ts`), AI fallback via pi-ai. Extracts `@bot-identity` mentions.
-3. `agents/` — Bot-identity system. Loads `.md` files with YAML frontmatter defining agent personas, model/provider overrides, and tool sets.
+2. `intent/` — Parses user text into structured `ParsedIntent`. Regex patterns first (`patterns.ts`), AI fallback via pi-ai.
+3. `personas/` — Persona resolver. Caches persona `.md` files in `PERSONAS/` directory (named `{personaId}--{personaVersionId}.md`). Downloads from API on cache miss. Each message carries `personaId`/`personaVersionId`; the worker resolves and recreates the agent when persona changes.
 4. `agent-tools/` — Tool registry for pi-agent-core agents. Core tools (file, bash, search, git, notify) and CLI agent tools (claude_code, gemini_cli, codex_cli, browser). `loadTools(toolSet, ctx)` dispatches by set name.
 5. `auto-answer/` — Three-tier system for automatically answering questions: (1) obvious pattern matching, (2) RULES.md rule lookup, (3) AI judgment.
 
@@ -82,7 +82,7 @@ ESM throughout (`"type": "module"`). TypeScript targets ES2022, bundled with tsu
 - **Worker-per-session** — Each session gets a dedicated child process for crash isolation.
 - **JSON Lines IPC** — Orchestrator ↔ worker communication via stdin/stdout.
 - **Adapter pattern** for messaging (swap REST vs PubNub).
-- **Bot-identity** — User-defined `.md` persona files with frontmatter overrides.
+- **Per-message persona** — Each message carries `personaId`/`personaVersionId`/`model`. Worker resolves persona from local cache or API, recreates agent when persona or model changes.
 - **Steering** — Messages to busy sessions forwarded as `agent.steer()` instead of queueing.
 - **Zod schemas** for all config validation with defaults merging.
 
@@ -94,4 +94,10 @@ Jest with `ts-jest/presets/default-esm`. Tests live in `__tests__/` mirroring `a
 
 - `MILO_API_KEY` — Required. Agent authentication key.
 - `ANTHROPIC_API_KEY` — Optional. Enables AI-powered intent parsing, prompt enhancement, and auto-answer.
+- `OPENAI_API_KEY` — Optional. Enables OpenAI models (GPT-4, o1, etc.) via pi-ai.
+- `GEMINI_API_KEY` — Optional. Enables Google Gemini models via pi-ai.
 - `MILO_API_URL` — Optional. Override API endpoint (default: `https://www.milobot.dev/api`).
+
+## User Commands
+
+- `/models` — Lists all available models based on configured API keys. Can be sent as a message or via `uiAction: 'list_models'`.

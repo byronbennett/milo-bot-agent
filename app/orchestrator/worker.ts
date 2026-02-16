@@ -5,7 +5,8 @@
  * Communicates via JSON Lines on stdin (receive) / stdout (send).
  *
  * Each worker runs one pi-agent-core Agent instance that persists across tasks.
- * The agent's model, tools, and system prompt are configured via WORKER_INIT.
+ * The agent's persona and model can change per-message — when they do, the agent
+ * is recreated with the new system prompt and model.
  */
 
 import { sendIPC, readIPC } from './ipc.js';
@@ -20,6 +21,8 @@ import type {
 import { sendNotification } from '../utils/notify.js';
 
 const ORPHAN_TIMEOUT_MS = 30 * 60 * 1000;
+
+const DEFAULT_SYSTEM_PROMPT = 'You are MiloBot, a helpful AI coding agent. You are working on tasks for your user remotely.';
 
 // Worker state
 let sessionId = '';
@@ -37,9 +40,21 @@ let agent: import('@mariozechner/pi-agent-core').Agent | null = null;
 // Pending answers for tool safety questions
 const pendingAnswers = new Map<string, (answer: string) => void>();
 
-// Store init config for lazy agent creation
-let initPersona: string | undefined;
-let initConfig: WorkerInitMessage['config'] = {};
+// Per-message persona/model tracking
+let currentPersonaId: string | undefined;
+let currentPersonaVersionId: string | undefined;
+let currentModel: string | undefined;
+
+// Config from WORKER_INIT
+let apiUrl = '';
+let apiKey = '';
+let personasDir = '';
+let streaming = true;
+let initConfig: WorkerInitMessage['config'] = {
+  apiUrl: '',
+  apiKey: '',
+  personasDir: '',
+};
 
 function send(msg: WorkerToOrchestrator): void {
   sendIPC(process.stdout, msg);
@@ -54,8 +69,11 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   sessionName = msg.sessionName;
   projectPath = msg.projectPath;
   workspaceDir = msg.workspaceDir;
-  initPersona = msg.persona;
   initConfig = msg.config;
+  apiUrl = msg.config.apiUrl;
+  apiKey = msg.config.apiKey;
+  personasDir = msg.config.personasDir;
+  streaming = msg.config.streaming ?? true;
 
   initialized = true;
   log(`Initialized (project=${projectPath})`);
@@ -63,27 +81,20 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   send({ type: 'WORKER_READY', sessionId, pid: process.pid });
 }
 
-async function createAgent(msg: WorkerInitMessage): Promise<void> {
+/**
+ * Create or recreate the pi-agent-core Agent with the given system prompt and model.
+ */
+async function createAgent(systemPromptText: string | null, modelId: string | null): Promise<void> {
   const { Agent } = await import('@mariozechner/pi-agent-core');
   const { getModel } = await import('@mariozechner/pi-ai');
   const { loadTools } = await import('../agent-tools/index.js');
-  const { loadBotIdentity } = await import('../agents/bot-identity.js');
   const { join } = await import('path');
   const { readFileSync, existsSync } = await import('fs');
-
-  // Load bot-identity
-  const agentsDir = join(workspaceDir, 'agents');
-  const identityName = msg.persona ?? 'default';
-  const identity = loadBotIdentity(agentsDir, identityName);
 
   // Build system prompt
   const sections: string[] = [];
 
-  if (identity) {
-    sections.push(identity.systemPromptBody);
-  } else {
-    sections.push(`You are MiloBot, a helpful AI coding agent. You are working on tasks for your user remotely.`);
-  }
+  sections.push(systemPromptText ?? DEFAULT_SYSTEM_PROMPT);
 
   sections.push(`## Current Session\n- Working directory: ${projectPath}\n- Session: ${sessionName}`);
 
@@ -110,12 +121,12 @@ Always use the notify_user tool to communicate important progress or results to 
   const systemPrompt = sections.join('\n\n');
 
   // Resolve model
-  const provider = identity?.model?.provider ?? msg.config.agentProvider ?? 'anthropic';
-  const modelId = identity?.model?.id ?? msg.config.agentModel ?? 'claude-sonnet-4-20250514';
-  const model = getModel(provider as any, modelId as any);
+  const provider = initConfig.agentProvider ?? 'anthropic';
+  const resolvedModelId = modelId ?? initConfig.agentModel ?? 'claude-sonnet-4-20250514';
+  const model = getModel(provider as any, resolvedModelId as any);
 
   // Resolve tool set
-  const toolSet = identity?.toolSet ?? msg.config.toolSet ?? 'full';
+  const toolSet = initConfig.toolSet ?? 'full';
   const tools = loadTools(toolSet as any, {
     projectPath,
     sendNotification: (message: string) => {
@@ -155,7 +166,7 @@ Always use the notify_user tool to communicate important progress or results to 
 
     switch (event.type) {
       case 'message_update':
-        if (event.assistantMessageEvent?.type === 'text_delta') {
+        if (streaming && event.assistantMessageEvent?.type === 'text_delta') {
           send({
             type: 'WORKER_STREAM_TEXT',
             sessionId,
@@ -191,7 +202,7 @@ Always use the notify_user tool to communicate important progress or results to 
     }
   });
 
-  log(`Agent created (model=${modelId}, tools=${tools.length}, identity=${identityName})`);
+  log(`Agent created (model=${resolvedModelId}, tools=${tools.length})`);
 }
 
 async function handleTask(msg: WorkerTaskMessage): Promise<void> {
@@ -207,27 +218,55 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
   log(`Task started: ${msg.taskId}`);
 
   try {
-    // Lazy agent creation on first task
-    if (!agent) {
-      await createAgent({
-        type: 'WORKER_INIT',
-        sessionId,
-        sessionName,
-        sessionType: 'bot',
-        projectPath,
-        workspaceDir,
-        persona: initPersona,
-        config: initConfig,
-      });
+    // Check if persona or model changed — if so, recreate the agent
+    const personaChanged =
+      msg.personaId !== currentPersonaId ||
+      msg.personaVersionId !== currentPersonaVersionId;
+    const modelChanged = msg.model !== currentModel;
+    const needsRecreate = !agent || personaChanged || modelChanged;
+
+    log(`Task ${msg.taskId}: prompt="${msg.prompt.slice(0, 100)}" agentExists=${!!agent} personaChanged=${personaChanged} modelChanged=${modelChanged} needsRecreate=${needsRecreate}`);
+    log(`  msg.personaId=${msg.personaId ?? 'undefined'} msg.personaVersionId=${msg.personaVersionId ?? 'undefined'} msg.model=${msg.model ?? 'undefined'}`);
+    log(`  current: personaId=${currentPersonaId ?? 'undefined'} personaVersionId=${currentPersonaVersionId ?? 'undefined'} model=${currentModel ?? 'undefined'}`);
+
+    if (needsRecreate) {
+      // Resolve persona system prompt
+      let systemPromptText: string | null = null;
+
+      if (msg.personaId && msg.personaVersionId) {
+        const { resolvePersona } = await import('../personas/resolver.js');
+        systemPromptText = await resolvePersona({
+          personasDir,
+          personaId: msg.personaId,
+          personaVersionId: msg.personaVersionId,
+          apiUrl,
+          apiKey,
+        });
+        log(`Persona resolved: ${msg.personaId}@${msg.personaVersionId}`);
+      }
+
+      const resolvedModel = msg.model ?? initConfig.agentModel ?? 'claude-sonnet-4-20250514';
+      log(`Creating agent with model=${resolvedModel} provider=${initConfig.agentProvider ?? 'anthropic'}`);
+      await createAgent(systemPromptText, resolvedModel);
+
+      // Update tracking
+      currentPersonaId = msg.personaId;
+      currentPersonaVersionId = msg.personaVersionId;
+      currentModel = msg.model;
     }
 
+    const promptStart = Date.now();
+    log(`Calling agent.prompt()...`);
     await agent!.prompt(msg.prompt);
+    const promptDuration = Date.now() - promptStart;
+    log(`agent.prompt() completed in ${promptDuration}ms`);
 
     if (cancelRequested) {
       send({ type: 'WORKER_TASK_CANCELLED', taskId: msg.taskId, sessionId });
     } else {
       // Extract final assistant text
       const messages = agent!.state.messages;
+      log(`Agent has ${messages.length} messages after prompt`);
       const lastAssistant = [...messages].reverse().find((m) => 'role' in m && (m as any).role === 'assistant');
       let output = '';
       if (lastAssistant && 'content' in lastAssistant) {
@@ -239,6 +278,12 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
             .map((b) => b.text)
             .join('\n');
         }
+      }
+
+      if (!output) {
+        log(`WARNING: No assistant output extracted. lastAssistant=${lastAssistant ? JSON.stringify(lastAssistant).slice(0, 500) : 'null'}`);
+      } else {
+        log(`Output (${output.length} chars): "${output.slice(0, 200)}"`);
       }
 
       send({

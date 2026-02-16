@@ -139,7 +139,7 @@ export class PubNubAdapter implements MessagingAdapter {
    * Handle an incoming PubNub message on the cmd channel
    */
   private handleIncomingMessage(msg: PubNubCommandMessage): void {
-    this.logger.verbose(`PubNub cmd message: type=${msg.type}, messageId=${msg.messageId}`);
+    this.logger.verbose(`PubNub cmd message:\n${JSON.stringify(msg, null, 2)}`);
     if (msg.type !== 'user_message') {
       this.logger.verbose(`Ignoring non-user_message type: ${msg.type}`);
       return;
@@ -152,7 +152,8 @@ export class PubNubAdapter implements MessagingAdapter {
       sessionType: msg.sessionType || 'bot',
       content: msg.content,
       uiAction: msg.uiAction,
-      persona: msg.persona,
+      personaId: msg.personaId,
+      personaVersionId: msg.personaVersionId,
       model: msg.model,
       createdAt: msg.timestamp,
     };
@@ -365,6 +366,35 @@ export class PubNubAdapter implements MessagingAdapter {
       this.logger.info(`Published agent status: "${content}" (timetoken: ${result.timetoken})`);
     } catch (err) {
       this.logger.warn('PubNub agent status publish failed:', err);
+    }
+  }
+
+  /**
+   * Publish a structured models list event to the browser
+   */
+  async publishModelsList(
+    sessionId: string,
+    models: NonNullable<PubNubEventMessage['models']>,
+    content: string,
+  ): Promise<void> {
+    if (!this.pubnub || !this.isConnected) return;
+
+    try {
+      const message: PubNubEventMessage = {
+        type: 'models_list',
+        agentId: this.agentId,
+        sessionId,
+        content,
+        models,
+        timestamp: new Date().toISOString(),
+      };
+
+      await this.pubnub.publish({
+        channel: this.evtChannel,
+        message: message as unknown as PubNub.Payload,
+      });
+    } catch (err) {
+      this.logger.warn('PubNub models list publish failed:', err);
     }
   }
 

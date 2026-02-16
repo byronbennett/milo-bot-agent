@@ -158,6 +158,7 @@ export interface AgentConfig {
     sessionsDir: string;
     templatesDir: string;
     toolsDir: string;
+    personasDir: string;
   };
   claudeCode: {
     maxConcurrentSessions: number;
