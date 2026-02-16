@@ -62,7 +62,7 @@ export const defaultConfig: AgentConfig = {
   pubnub: {
     enabled: true,
   },
-  streaming: true,
+  streaming: false,
   onboardingComplete: false,
 };
 

@@ -86,7 +86,7 @@ export const agentConfigSchema = z.object({
   ai: aiConfigSchema.default({}),
   messaging: messagingConfigSchema.default({}),
   pubnub: pubnubConfigSchema.default({}),
-  streaming: z.boolean().default(true),
+  streaming: z.boolean().default(false),
   onboardingComplete: z.boolean().default(false),
 });
 

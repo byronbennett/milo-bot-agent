@@ -1,13 +1,14 @@
 import PubNub from 'pubnub';
 import type { MessagingAdapter } from './adapter';
 import type { HeartbeatResponse, PendingMessage } from '../shared';
-import type { PubNubCommandMessage, PubNubEventMessage, PubNubTokenResponse } from './pubnub-types';
+import type { PubNubCommandMessage, PubNubControlMessage, PubNubEventMessage, PubNubTokenResponse } from './pubnub-types';
 import { Logger } from '../utils/logger';
 
 export interface PubNubAdapterOptions {
   apiUrl: string;
   apiKey: string;
   onMessage: (message: PendingMessage) => Promise<void>;
+  onControl?: (message: PubNubControlMessage) => Promise<void>;
   logger?: Logger;
 }
 
@@ -16,6 +17,7 @@ export class PubNubAdapter implements MessagingAdapter {
   private apiUrl: string;
   private apiKey: string;
   private onMessage: (message: PendingMessage) => Promise<void>;
+  private onControl?: (message: PubNubControlMessage) => Promise<void>;
   private logger: Logger;
 
   private agentId: string = '';
@@ -33,6 +35,7 @@ export class PubNubAdapter implements MessagingAdapter {
     this.apiUrl = options.apiUrl.replace(/\/$/, '');
     this.apiKey = options.apiKey;
     this.onMessage = options.onMessage;
+    this.onControl = options.onControl;
     this.logger = options.logger || new Logger({ prefix: '[pubnub]' });
   }
 
@@ -96,7 +99,7 @@ export class PubNubAdapter implements MessagingAdapter {
           this.logger.verbose(`PubNub message event on channel: ${event.channel}`);
           this.logger.debug('PubNub message payload:', event.message);
           if (event.channel === this.cmdChannel) {
-            this.handleIncomingMessage(event.message as unknown as PubNubCommandMessage);
+            this.handleIncomingMessage(event.message as unknown as (PubNubCommandMessage | PubNubControlMessage));
           } else {
             this.logger.verbose(`Ignoring message on non-cmd channel: ${event.channel} (expected: ${this.cmdChannel})`);
           }
@@ -138,28 +141,37 @@ export class PubNubAdapter implements MessagingAdapter {
   /**
    * Handle an incoming PubNub message on the cmd channel
    */
-  private handleIncomingMessage(msg: PubNubCommandMessage): void {
+  private handleIncomingMessage(msg: PubNubCommandMessage | PubNubControlMessage): void {
     this.logger.verbose(`PubNub cmd message:\n${JSON.stringify(msg, null, 2)}`);
     if (msg.type !== 'user_message') {
-      this.logger.verbose(`Ignoring non-user_message type: ${msg.type}`);
+      if (this.onControl) {
+        this.onControl(msg as PubNubControlMessage).catch((err) => {
+          this.logger.error('Error processing control message:', err);
+        });
+      } else {
+        this.logger.verbose(`Ignoring non-user_message type: ${msg.type}`);
+      }
       return;
     }
 
+    // At this point, msg.type === 'user_message'
+    const cmd = msg as PubNubCommandMessage;
+
     const pending: PendingMessage = {
-      id: msg.messageId,
-      sessionId: msg.sessionId,
-      sessionName: msg.sessionName ?? null,
-      sessionType: msg.sessionType || 'bot',
-      content: msg.content,
-      uiAction: msg.uiAction,
-      personaId: msg.personaId,
-      personaVersionId: msg.personaVersionId,
-      model: msg.model,
-      createdAt: msg.timestamp,
+      id: cmd.messageId,
+      sessionId: cmd.sessionId,
+      sessionName: cmd.sessionName ?? cmd.session_name ?? null,
+      sessionType: cmd.sessionType || 'bot',
+      content: cmd.content,
+      uiAction: cmd.uiAction ?? cmd.ui_action,
+      personaId: cmd.personaId,
+      personaVersionId: cmd.personaVersionId,
+      model: cmd.model,
+      createdAt: cmd.timestamp,
     };
 
-    this.logger.info(`Real-time message received: ${msg.messageId}`);
-    this.logger.verbose(`Message content: "${msg.content.slice(0, 100)}"`);
+    this.logger.info(`Real-time message received: ${cmd.messageId}`);
+    this.logger.verbose(`Message content: "${cmd.content.slice(0, 100)}"`);
 
     // Process asynchronously - don't block the listener
     this.onMessage(pending).catch((err) => {

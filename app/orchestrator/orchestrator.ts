@@ -11,10 +11,12 @@
  * Replaces the old MiloAgent class.
  */
 
+import { existsSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
 import { WebAppAdapter, PubNubAdapter } from '../messaging/index.js';
+import type { PubNubControlMessage } from '../messaging/pubnub-types.js';
 import type { PendingMessage } from '../shared/index.js';
 import { getDb, closeDb } from '../db/index.js';
 import { insertInbox, markProcessed, getUnprocessed } from '../db/inbox.js';
@@ -130,6 +132,7 @@ export class Orchestrator {
           apiUrl: this.config.messaging.webapp.apiUrl,
           apiKey: process.env.MILO_API_KEY || '',
           onMessage: this.handlePubNubMessage.bind(this),
+          onControl: this.handlePubNubControl.bind(this),
           logger: this.logger,
         });
         this.pubnubAdapter.pubsubOnly = true; // Orchestrator manages REST persistence via outbox
@@ -232,6 +235,50 @@ export class Orchestrator {
 
     // 5. Mark inbox processed
     markProcessed(this.db, message.id);
+  }
+
+  /**
+   * Handle a control message from PubNub (non-user_message types).
+   * These are server-initiated commands like session deletion.
+   */
+  private async handlePubNubControl(message: PubNubControlMessage): Promise<void> {
+    this.logger.info(`PubNub control: ${message.type} (ui_action=${message.ui_action})`);
+
+    if (message.ui_action === 'DELETE_SESSION' || message.type === 'session_deleted') {
+      await this.handleDeleteSession(message.sessionId, message.sessionName);
+    } else {
+      this.logger.verbose(`Unhandled control message type: ${message.type}`);
+    }
+  }
+
+  /**
+   * Handle session deletion: stop worker, update DB, remove session file.
+   */
+  private async handleDeleteSession(sessionId: string, sessionName?: string): Promise<void> {
+    this.logger.info(`Deleting session ${sessionId} (name=${sessionName})`);
+
+    // 1. Close session actor (cancel tasks, stop worker process)
+    await this.actorManager.closeSession(sessionId);
+
+    // 2. Update session status in SQLite
+    updateSessionStatus(this.db, sessionId, 'CLOSED');
+    insertSessionMessage(this.db, sessionId, 'system', 'Session deleted by user');
+
+    // 3. Delete session file from SESSION directory
+    if (sessionName) {
+      const sessionsDir = join(this.config.workspace.baseDir, 'SESSION');
+      const sessionFile = join(sessionsDir, `${sessionName}.md`);
+      try {
+        if (existsSync(sessionFile)) {
+          unlinkSync(sessionFile);
+          this.logger.info(`Deleted session file: ${sessionFile}`);
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to delete session file ${sessionFile}:`, err);
+      }
+    }
+
+    this.logger.info(`Session ${sessionId} deleted`);
   }
 
   /**
@@ -372,9 +419,14 @@ export class Orchestrator {
    * UI actions take precedence, then pattern matching.
    */
   private deriveWorkItemType(message: PendingMessage): WorkItemType {
-    // UI actions take precedence
-    if (message.uiAction === 'list_models') return 'LIST_MODELS';
+    // UI actions take precedence (case-insensitive)
+    const action = message.uiAction?.toUpperCase();
+    if (action === 'CANCEL') return 'CANCEL';
+    if (action === 'CLOSE_SESSION') return 'CLOSE_SESSION';
+    if (action === 'STATUS_REQUEST') return 'STATUS_REQUEST';
+    if (action === 'LIST_MODELS') return 'LIST_MODELS';
 
+    // Text pattern matching fallback
     const lower = message.content.toLowerCase().trim();
 
     if (lower === 'cancel' || lower === '/cancel') return 'CANCEL';

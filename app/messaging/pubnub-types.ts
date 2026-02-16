@@ -11,11 +11,23 @@ export interface PubNubCommandMessage {
   sessionId: string;
   sessionType: 'chat' | 'bot';
   sessionName?: string;
+  session_name?: string;   // snake_case wire format from web app API
   content: string;
   uiAction?: string;
+  ui_action?: string;      // snake_case wire format from web app API
   personaId?: string;
   personaVersionId?: string;
   model?: string;
+  timestamp: string;
+}
+
+/** Server -> Agent control messages (received on cmd channel) */
+export interface PubNubControlMessage {
+  type: string;
+  ui_action?: string;
+  agentId: string;
+  sessionId: string;
+  sessionName?: string;
   timestamp: string;
 }
 

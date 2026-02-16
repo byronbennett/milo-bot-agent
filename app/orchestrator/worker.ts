@@ -49,7 +49,7 @@ let currentModel: string | undefined;
 let apiUrl = '';
 let apiKey = '';
 let personasDir = '';
-let streaming = true;
+let streaming = false;
 let initConfig: WorkerInitMessage['config'] = {
   apiUrl: '',
   apiKey: '',
@@ -73,7 +73,7 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   apiUrl = msg.config.apiUrl;
   apiKey = msg.config.apiKey;
   personasDir = msg.config.personasDir;
-  streaming = msg.config.streaming ?? true;
+  streaming = msg.config.streaming ?? false;
 
   initialized = true;
   log(`Initialized (project=${projectPath})`);
