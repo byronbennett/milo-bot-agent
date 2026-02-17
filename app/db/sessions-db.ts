@@ -13,6 +13,7 @@ export interface SessionRecord {
   worker_pid?: number;
   worker_state?: string;
   current_task_id?: string;
+  confirmed_project?: string;
   created_at: string;
   updated_at: string;
   closed_at?: string;
@@ -60,6 +61,17 @@ export function insertSessionMessage(db: Database.Database, sessionId: string, s
   db.prepare(`
     INSERT INTO session_messages (session_id, sender, content, message_id) VALUES (?, ?, ?, ?)
   `).run(sessionId, sender, content, messageId ?? null);
+}
+
+export function updateConfirmedProject(db: Database.Database, sessionId: string, projectName: string): void {
+  db.prepare(`
+    UPDATE sessions SET confirmed_project = ?, updated_at = datetime('now') WHERE session_id = ?
+  `).run(projectName, sessionId);
+}
+
+export function getConfirmedProject(db: Database.Database, sessionId: string): string | undefined {
+  const row = db.prepare(`SELECT confirmed_project FROM sessions WHERE session_id = ?`).get(sessionId) as { confirmed_project?: string } | undefined;
+  return row?.confirmed_project ?? undefined;
 }
 
 export function getSessionMessages(db: Database.Database, sessionId: string, limit = 50): Array<{ sender: string; content: string; created_at: string }> {

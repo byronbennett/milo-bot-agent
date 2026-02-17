@@ -80,4 +80,6 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE session_messages RENAME COLUMN event_id TO message_id`,
   // Add message_id to session_messages if it doesn't exist (for DBs created after event_id was removed but before message_id was added)
   `ALTER TABLE session_messages ADD COLUMN message_id TEXT`,
+  // Add confirmed_project to sessions for persisting project selection across crashes
+  `ALTER TABLE sessions ADD COLUMN confirmed_project TEXT`,
 ];
