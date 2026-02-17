@@ -11,7 +11,7 @@
  * Replaces the old MiloAgent class.
  */
 
-import { existsSync, unlinkSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
@@ -25,7 +25,9 @@ import {
   upsertSession,
   updateSessionStatus,
   updateWorkerState,
+  updateConfirmedProject,
   getActiveSessions,
+  getConfirmedProject,
   insertSessionMessage,
 } from '../db/sessions-db.js';
 import { SessionActorManager } from './session-actor.js';
@@ -35,6 +37,8 @@ import { HeartbeatScheduler } from '../scheduler/heartbeat.js';
 import { Logger, logger } from '../utils/logger.js';
 import { getProviders, getModels, getEnvApiKey, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
 import type Database from 'better-sqlite3';
+import { loadTools, type ToolContext } from '../agent-tools/index.js';
+import { discoverSkills } from '../skills/skills-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -56,6 +60,7 @@ export class Orchestrator {
   private scheduler: HeartbeatScheduler;
   private outboxTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private startedAt: Date | null = null;
   private shuttingDown = false;
   private orphanMonitors = new Map<string, NodeJS.Timeout>();
   private orphanedSessionIds = new Set<string>();
@@ -86,12 +91,17 @@ export class Orchestrator {
 
   async start(): Promise<void> {
     if (this.isRunning) return;
+    this.startedAt = new Date();
 
     this.logger.info('Starting orchestrator...');
 
     // 1. Open SQLite
     this.db = getDb(this.config.workspace.baseDir);
     this.logger.verbose('SQLite database opened');
+
+    // Ensure PROJECTS directory exists
+    const projectsDir = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
+    mkdirSync(projectsDir, { recursive: true });
 
     // 1b. Recover orphaned sessions from prior crash
     this.recoverOrphanedSessions();
@@ -370,8 +380,23 @@ export class Orchestrator {
       return;
     }
 
-    // Determine project path
-    const projectPath = this.config.workspace.baseDir;
+    // STATUS_REQUEST doesn't need a worker — handle inline
+    if (workItemType === 'STATUS_REQUEST') {
+      const statusText = this.buildStatusReport(message.sessionId);
+      this.publishEvent(message.sessionId, statusText);
+      enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: statusText }, message.sessionId);
+      return;
+    }
+
+    // Determine project path — restore confirmed project if available
+    let projectPath = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
+    const confirmedProject = getConfirmedProject(this.db, message.sessionId);
+    if (confirmedProject) {
+      const restored = join(projectPath, confirmedProject);
+      if (existsSync(restored)) {
+        projectPath = restored;
+      }
+    }
 
     // Get or create actor (spawns worker if needed)
     const actor = await this.actorManager.getOrCreate(message.sessionId, {
@@ -528,6 +553,17 @@ export class Orchestrator {
           this.publishEvent(sessionId, `Tool ${event.toolName} failed: ${event.summary ?? 'unknown error'}`);
         }
         break;
+
+      case 'WORKER_PROJECT_SET': {
+        const actor = this.actorManager.get(sessionId);
+        if (actor) {
+          actor.projectPath = event.projectPath;
+        }
+        updateConfirmedProject(this.db, sessionId, event.projectName);
+        const verb = event.isNew ? 'Created and set' : 'Set';
+        this.logger.info(`${verb} project "${event.projectName}" for session ${sessionId}`);
+        break;
+      }
 
       case 'WORKER_QUESTION':
         updateSessionStatus(this.db, sessionId, 'OPEN_WAITING_USER');
@@ -817,9 +853,130 @@ export class Orchestrator {
 
   // --- Status ---
 
+  /**
+   * Format a millisecond duration as a human-readable string (e.g. "2h 15m 3s").
+   */
+  private formatUptime(ms: number): string {
+    const seconds = Math.floor(ms / 1000);
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (parts.length === 0 || secs > 0) parts.push(`${secs}s`);
+    return parts.join(' ');
+  }
+
+  /**
+   * Get available tool names by constructing a minimal dummy context.
+   */
+  private getAvailableToolNames(): string[] {
+    const dummyCtx: ToolContext = {
+      projectPath: join(this.config.workspace.baseDir, this.config.workspace.projectsDir),
+      workspaceDir: this.config.workspace.baseDir,
+      sessionId: '_status',
+      sessionName: '_status',
+      currentTaskId: () => null,
+      preferAPIKeyClaude: this.config.claudeCode.preferAPIKey,
+      sendNotification: () => {},
+      askUser: async () => '',
+    };
+    try {
+      return loadTools('full', dummyCtx).map((t) => t.name);
+    } catch {
+      return ['(unable to enumerate)'];
+    }
+  }
+
+  /**
+   * Build a Markdown-formatted status report.
+   */
+  private buildStatusReport(requestingSessionId: string): string {
+    const lines: string[] = [];
+
+    // --- Header ---
+    const uptime = this.startedAt
+      ? this.formatUptime(Date.now() - this.startedAt.getTime())
+      : 'unknown';
+    const pubStatus = this.pubnubAdapter?.isConnected ? 'connected' : 'disconnected';
+
+    lines.push(`### ${this.config.agentName} — Agent Status`);
+    lines.push('');
+    lines.push('| | |');
+    lines.push('|---|---|');
+    lines.push(`| **Uptime** | \`${uptime}\` |`);
+    lines.push(`| **Default Model** | \`${this.config.ai.agent.model}\` |`);
+    lines.push(`| **Utility Model** | \`${this.config.ai.utility.model}\` |`);
+    lines.push(`| **PubNub** | \`${pubStatus}\` |`);
+    lines.push(`| **Streaming** | \`${this.config.streaming ? 'on' : 'off'}\` |`);
+
+    // --- Models ---
+    const { structured } = this.getAvailableModels();
+    const modelCount = structured.providers.reduce((sum, p) => sum + p.models.length, 0);
+    lines.push('');
+    lines.push(`#### Models — ${modelCount} across ${structured.providers.length} provider${structured.providers.length !== 1 ? 's' : ''}`);
+    if (structured.providers.length === 0) {
+      lines.push('*No API keys configured.*');
+    } else {
+      for (const provider of structured.providers) {
+        const names = provider.models.map((m) => `\`${m.name}\``).join(' · ');
+        lines.push(`**${provider.provider}:** ${names}`);
+      }
+    }
+
+    // --- Tools ---
+    const toolNames = this.getAvailableToolNames();
+    lines.push('');
+    lines.push(`#### Tools — ${toolNames.length} registered`);
+    lines.push(toolNames.map((t) => `\`${t}\``).join(' · '));
+
+    // --- Skills ---
+    const skillsDir = join(this.config.workspace.baseDir, this.config.workspace.skillsDir);
+    const skills = discoverSkills(skillsDir);
+    lines.push('');
+    lines.push(`#### Skills — ${skills.length} loaded`);
+    if (skills.length > 0) {
+      for (const skill of skills) {
+        lines.push(`- **${skill.name}** — ${skill.description}`);
+      }
+    } else {
+      lines.push('*None*');
+    }
+
+    // --- Active sessions ---
+    const activeSessions = this.actorManager.listActive();
+    lines.push('');
+    lines.push(`#### Sessions — ${activeSessions.length} active`);
+    if (activeSessions.length === 0) {
+      lines.push('*No active sessions*');
+    } else {
+      lines.push('| Session | Status | Worker | Task | Queue |');
+      lines.push('|---|---|---|---|---|');
+      for (const actor of activeSessions) {
+        const name = actor.sessionId === requestingSessionId
+          ? `**${actor.sessionName}** *(this)*`
+          : actor.sessionName;
+        const status = `\`${actor.status}\``;
+        const worker = actor.worker
+          ? `\`${actor.worker.state}\` (pid ${actor.worker.pid})`
+          : '—';
+        const task = actor.currentTask ? 'running' : '—';
+        const queued = String(actor.queueHigh.length + actor.queueNormal.length);
+        lines.push(`| ${name} | ${status} | ${worker} | ${task} | ${queued} |`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
   getStatus() {
     return {
       running: this.isRunning,
+      startedAt: this.startedAt?.toISOString() ?? null,
       activeSessions: this.actorManager?.listActive().length ?? 0,
     };
   }
