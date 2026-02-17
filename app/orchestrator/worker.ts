@@ -33,6 +33,7 @@ let initialized = false;
 let currentTaskId: string | null = null;
 let cancelRequested = false;
 let orphanHandled = false;
+let projectChanged = false;
 
 // pi-agent-core Agent (lazy, kept alive across tasks)
 let agent: import('@mariozechner/pi-agent-core').Agent | null = null;
@@ -237,6 +238,17 @@ When asked to research something (find YouTube channels, compare options, gather
           break;
       }
     },
+    onProjectSet: (projectName: string, newProjectPath: string, isNew: boolean) => {
+      projectPath = newProjectPath;
+      projectChanged = true;
+      send({
+        type: 'WORKER_PROJECT_SET',
+        sessionId,
+        projectName,
+        projectPath: newProjectPath,
+        isNew,
+      });
+    },
   });
 
   agent = new Agent({
@@ -323,7 +335,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
       msg.personaId !== currentPersonaId ||
       msg.personaVersionId !== currentPersonaVersionId;
     const modelChanged = msg.model !== currentModel;
-    const needsRecreate = !agent || personaChanged || modelChanged;
+    const needsRecreate = !agent || personaChanged || modelChanged || projectChanged;
 
     log(`Task ${msg.taskId}: prompt="${msg.prompt.slice(0, 100)}" agentExists=${!!agent} personaChanged=${personaChanged} modelChanged=${modelChanged} needsRecreate=${needsRecreate}`);
     log(`  msg.personaId=${msg.personaId ?? 'undefined'} msg.personaVersionId=${msg.personaVersionId ?? 'undefined'} msg.model=${msg.model ?? 'undefined'}`);
@@ -353,6 +365,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
       currentPersonaId = msg.personaId;
       currentPersonaVersionId = msg.personaVersionId;
       currentModel = msg.model;
+      projectChanged = false;
     }
 
     const promptStart = Date.now();
