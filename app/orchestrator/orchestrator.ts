@@ -16,7 +16,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
 import { WebAppAdapter, PubNubAdapter } from '../messaging/index.js';
-import type { PubNubControlMessage } from '../messaging/pubnub-types.js';
+import type { PubNubControlMessage, PubNubSkillCommand } from '../messaging/pubnub-types.js';
+import { SkillInstaller } from '../skills/skill-installer.js';
 import type { PendingMessage } from '../shared/index.js';
 import { getDb, closeDb } from '../db/index.js';
 import { insertInbox, markProcessed, getUnprocessed } from '../db/inbox.js';
@@ -64,6 +65,8 @@ export class Orchestrator {
   private shuttingDown = false;
   private orphanMonitors = new Map<string, NodeJS.Timeout>();
   private orphanedSessionIds = new Set<string>();
+  private skillInstaller!: SkillInstaller;
+  private agentId: string = '';
 
   constructor(options: OrchestratorOptions) {
     this.config = options.config;
@@ -128,9 +131,18 @@ export class Orchestrator {
       },
     });
 
+    // 2b. Create skill installer
+    this.skillInstaller = new SkillInstaller({
+      skillsDir: join(this.config.workspace.baseDir, this.config.workspace.skillsDir),
+      apiUrl: this.config.messaging.webapp.apiUrl,
+      apiKey: process.env.MILO_API_KEY || '',
+      logger: this.logger,
+    });
+
     // 3. Verify connection and sync models
     try {
       const hb = await this.restAdapter.sendHeartbeat();
+      this.agentId = hb.agentId;
       this.logger.info(`Connected as agent: ${hb.agentId}`);
       await this.syncModelsToServer();
     } catch (err) {
@@ -258,8 +270,50 @@ export class Orchestrator {
 
     if (message.ui_action === 'DELETE_SESSION' || message.type === 'session_deleted') {
       await this.handleDeleteSession(message.sessionId, message.sessionName);
+    } else if (message.type === 'ui_action') {
+      await this.handleUiAction(message as unknown as PubNubSkillCommand);
     } else {
       this.logger.verbose(`Unhandled control message type: ${message.type}`);
+    }
+  }
+
+  /**
+   * Handle a UI action from the browser (skill install/update/delete).
+   */
+  private async handleUiAction(command: PubNubSkillCommand): Promise<void> {
+    const { action, skill, requestId } = command;
+    this.logger.info(`UI action: ${action} skill=${skill.slug} v${skill.version}`);
+
+    let result: { success: boolean; error?: string };
+
+    switch (action) {
+      case 'skill_install':
+        result = await this.skillInstaller.installSkill(skill.slug, skill.version, skill.type, skill.filename);
+        break;
+      case 'skill_update':
+        result = await this.skillInstaller.updateSkill(skill.slug, skill.version, skill.type, skill.filename);
+        break;
+      case 'skill_delete':
+        result = await this.skillInstaller.deleteSkill(skill.slug);
+        break;
+      default:
+        this.logger.verbose(`Unhandled ui_action: ${action}`);
+        return;
+    }
+
+    // Publish result back to browser via PubNub
+    if (this.pubnubAdapter) {
+      await this.pubnubAdapter.publishEvent({
+        type: 'ui_action_result',
+        agentId: this.agentId,
+        action,
+        requestId,
+        skillSlug: skill.slug,
+        skillVersion: skill.version,
+        skillSuccess: result.success,
+        skillError: result.error ?? null,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 

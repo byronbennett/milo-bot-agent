@@ -411,6 +411,27 @@ export class PubNubAdapter implements MessagingAdapter {
   }
 
   /**
+   * Publish a generic event message to the browser via the evt channel.
+   * Used for skill action results and other custom events.
+   */
+  async publishEvent(eventMessage: PubNubEventMessage): Promise<void> {
+    if (!this.pubnub || !this.isConnected) {
+      this.logger.warn('Cannot publish event (not connected)');
+      return;
+    }
+
+    try {
+      await this.pubnub.publish({
+        channel: this.evtChannel,
+        message: eventMessage as unknown as PubNub.Payload,
+      });
+      this.logger.verbose(`Published event: ${eventMessage.type}`);
+    } catch (err) {
+      this.logger.error('Failed to publish event:', err);
+    }
+  }
+
+  /**
    * Send a message with context size information
    */
   async sendMessageWithContext(
