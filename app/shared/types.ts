@@ -145,6 +145,27 @@ export interface SessionFile {
 }
 
 // ============================================================================
+// Skill Types
+// ============================================================================
+
+export interface SkillManifestEntry {
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  type: 'md' | 'zip';
+  filename: string;
+  category: string;
+  tags: string[];
+}
+
+export interface SkillWithStatus extends SkillManifestEntry {
+  installed: boolean;
+  installedVersion: string | null;
+  updateAvailable: boolean;
+}
+
+// ============================================================================
 // Config Types (Local Agent)
 // ============================================================================
 

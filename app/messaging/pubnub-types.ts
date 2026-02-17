@@ -49,6 +49,7 @@ export type PubNubEventType =
   | 'subagent_output'
   | 'task_cancel_requested'
   | 'task_cancelled'
+  | 'ui_action_result'
   | 'error';
 
 export interface PubNubEventMessage {
@@ -80,7 +81,27 @@ export interface PubNubEventMessage {
       models: Array<{ id: string; name: string }>;
     }>;
   };
+  /** Skill action result fields */
+  action?: string;
+  requestId?: string;
+  skillSlug?: string;
+  skillVersion?: string;
+  skillSuccess?: boolean;
+  skillError?: string | null;
   timestamp: string;
+}
+
+/** Skill action command from browser (received on cmd channel) */
+export interface PubNubSkillCommand {
+  type: 'ui_action';
+  action: 'skill_install' | 'skill_update' | 'skill_delete';
+  skill: {
+    slug: string;
+    version: string;
+    type: 'md' | 'zip';
+    filename: string;
+  };
+  requestId: string;
 }
 
 /** Response from POST /api/pubnub/token/agent */

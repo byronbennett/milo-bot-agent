@@ -2,7 +2,7 @@
  * API request and response types
  */
 
-import type { Agent, Message, Session, SessionStatus, SessionType, SubscriptionTier } from './types';
+import type { Agent, Message, Session, SessionStatus, SessionType, SkillWithStatus, SubscriptionTier } from './types';
 
 // ============================================================================
 // Common Response Types
@@ -198,6 +198,18 @@ export interface OnboardingStatusResponse {
   completed: boolean;
   hasAgent: boolean;
   agentConnected: boolean;
+}
+
+// ============================================================================
+// Skills API
+// ============================================================================
+
+export interface SkillsListResponse {
+  skills: SkillWithStatus[];
+}
+
+export interface SkillInstalledRequest {
+  version: string;
 }
 
 // ============================================================================
