@@ -20,19 +20,21 @@
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@inquirer/prompts": "^7.2.1",
     "@mariozechner/pi-agent-core": "^0.52.12",
     "@mariozechner/pi-ai": "^0.52.12",
     "@sinclair/typebox": "0.34.48",
+    "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.6.2",
     "commander": "^12.1.0",
     "node-cron": "^3.0.3",
     "open": "9",
     "pubnub": "^8.10.0",
-    "zod": "^3.24.1",
-    "@anthropic-ai/claude-agent-sdk": "^0.1.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.0",
