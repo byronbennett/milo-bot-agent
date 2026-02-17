@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import { input, confirm, select } from '@inquirer/prompts';
 import open from 'open';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { resolve, join } from 'path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, copyFileSync, statSync } from 'fs';
+import { resolve, join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { Logger } from '../utils/logger';
 import {
@@ -12,6 +13,9 @@ import {
   saveGeminiKey, loadGeminiKey, deleteGeminiKey,
   isKeychainAvailable,
 } from '../utils/keychain';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const logger = new Logger({ prefix: '[init]' });
 
@@ -805,6 +809,34 @@ dist/
       if (!existsSync(gitkeepPath)) {
         writeFileSync(gitkeepPath, '');
       }
+    }
+
+    // Copy default skills if SKILLS dir is empty
+    const defaultSkillsSrc = join(__dirname, '..', 'templates', 'SKILLS');
+    const workspaceSkillsDir = join(resolvedDir, 'SKILLS');
+    if (existsSync(defaultSkillsSrc)) {
+      const existingSkills = existsSync(workspaceSkillsDir)
+        ? readdirSync(workspaceSkillsDir).filter((f) => f !== '.gitkeep')
+        : [];
+      if (existingSkills.length === 0) {
+        mkdirSync(workspaceSkillsDir, { recursive: true });
+        const defaultSkills = readdirSync(defaultSkillsSrc);
+        for (const skill of defaultSkills) {
+          const srcPath = join(defaultSkillsSrc, skill);
+          if (statSync(srcPath).isFile()) {
+            copyFileSync(srcPath, join(workspaceSkillsDir, skill));
+          }
+        }
+      }
+    }
+
+    // Copy DEFAULT-CLAUDE.md to workspace templates if not present
+    const defaultClaudeMdSrc = join(__dirname, '..', 'templates', 'DEFAULT-CLAUDE.md');
+    const workspaceTemplatesDir = join(resolvedDir, 'templates');
+    const destClaudeMd = join(workspaceTemplatesDir, 'DEFAULT-CLAUDE.md');
+    if (existsSync(defaultClaudeMdSrc) && !existsSync(destClaudeMd)) {
+      mkdirSync(workspaceTemplatesDir, { recursive: true });
+      copyFileSync(defaultClaudeMdSrc, destClaudeMd);
     }
 
     // Create config
