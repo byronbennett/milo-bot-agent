@@ -7,6 +7,7 @@ import { createNotifyTool } from './notify-tool.js';
 import { createCliAgentTools } from './cli-agent-tools.js';
 import { createClaudeCodeOAuthTool } from './claude-code-oauth-tool.js';
 import { createBrowserTool } from './browser-tool.js';
+import { createSetProjectTool } from './project-tool.js';
 
 export { isDangerousCommand } from './bash-tool.js';
 
@@ -34,6 +35,7 @@ export interface ToolContext {
     success?: boolean;
     summary?: string;
   }) => void;
+  onProjectSet?: (projectName: string, projectPath: string, isNew: boolean) => void;
 }
 
 export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] {
@@ -47,17 +49,22 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
     ? createCliAgentTools(ctx)
     : [createClaudeCodeOAuthTool(ctx), ...createCliAgentTools(ctx).filter((t) => t.name !== 'claude_code_cli')];
   const uiTools = [createNotifyTool(ctx.sendNotification)];
+  const setProjectTool = createSetProjectTool(ctx, {
+    onProjectSet: (projectName, newProjectPath, isNew) => {
+      ctx.onProjectSet?.(projectName, newProjectPath, isNew);
+    },
+  });
 
   switch (toolSet) {
     case 'full':
-      return [...coreTools, ...cliTools, uiTools[0], createBrowserTool()];
+      return [...coreTools, setProjectTool, ...cliTools, uiTools[0], createBrowserTool()];
     case 'chat':
       return [...uiTools];
     case 'minimal':
-      return [...coreTools, ...uiTools];
+      return [...coreTools, setProjectTool, ...uiTools];
     default:
       if (Array.isArray(toolSet)) {
-        const all = [...coreTools, ...cliTools, ...uiTools, createBrowserTool()];
+        const all = [...coreTools, setProjectTool, ...cliTools, ...uiTools, createBrowserTool()];
         return all.filter((t) => toolSet.includes(t.name));
       }
       return [...coreTools, ...uiTools];
