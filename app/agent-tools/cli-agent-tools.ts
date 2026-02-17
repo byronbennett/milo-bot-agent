@@ -7,6 +7,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { shouldAutoAnswer } from '../auto-answer/index.js';
 import { handleMessage, extractTextFromContent } from './claude-event-handler.js';
+import { assertProjectConfirmed } from './project-guard.js';
 
 const ClaudeCodeParams = Type.Object({
   prompt: Type.String({ description: 'Detailed task description or follow-up message for Claude Code' }),
@@ -100,6 +101,7 @@ export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
       const cwd = params.workingDirectory ?? ctx.projectPath;
+      assertProjectConfirmed(cwd, ctx.workspaceDir);
       const isResume = params.sessionId && knownSessionIds.has(params.sessionId);
 
       onUpdate?.({
@@ -185,7 +187,8 @@ export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
     label: 'Gemini CLI',
     description: 'Delegate a task to Google Gemini CLI (not yet implemented).',
     parameters: SimplePromptParams,
-    execute: async () => {
+    execute: async (_toolCallId, _params) => {
+      assertProjectConfirmed(ctx.projectPath, ctx.workspaceDir);
       throw new Error('Gemini CLI integration is not yet implemented.');
     },
   };
@@ -195,7 +198,8 @@ export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
     label: 'OpenAI Codex CLI',
     description: 'Delegate a task to OpenAI Codex CLI (not yet implemented).',
     parameters: SimplePromptParams,
-    execute: async () => {
+    execute: async (_toolCallId, _params) => {
+      assertProjectConfirmed(ctx.projectPath, ctx.workspaceDir);
       throw new Error('Codex CLI integration is not yet implemented.');
     },
   };

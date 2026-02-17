@@ -19,6 +19,7 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { ToolContext } from './index.js';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { handleMessage } from './claude-event-handler.js';
+import { assertProjectConfirmed } from './project-guard.js';
 
 const ClaudeOAuthParams = Type.Object({
   prompt: Type.String({ description: 'Detailed task description or follow-up message for Claude Code' }),
@@ -119,6 +120,7 @@ export function createClaudeCodeOAuthTool(ctx: ToolContext): AgentTool<typeof Cl
     execute: async (_toolCallId, params, signal, onUpdate) => {
       const claudeBinary = await findClaudeBinary();
       const cwd = params.workingDirectory ?? ctx.projectPath;
+      assertProjectConfirmed(cwd, ctx.workspaceDir);
       const isResume = params.sessionId && knownSessionIds.has(params.sessionId);
 
       onUpdate?.({
