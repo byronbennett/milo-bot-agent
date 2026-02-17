@@ -151,6 +151,14 @@ export interface WorkerQuestionMessage {
   options?: string[];
 }
 
+export interface WorkerProjectSetMessage {
+  type: 'WORKER_PROJECT_SET';
+  sessionId: string;
+  projectName: string;
+  projectPath: string;
+  isNew: boolean;
+}
+
 export type WorkerToOrchestrator =
   | WorkerReadyMessage
   | WorkerTaskStartedMessage
@@ -161,7 +169,8 @@ export type WorkerToOrchestrator =
   | WorkerStreamTextMessage
   | WorkerToolStartMessage
   | WorkerToolEndMessage
-  | WorkerQuestionMessage;
+  | WorkerQuestionMessage
+  | WorkerProjectSetMessage;
 
 // Union of all IPC messages
 export type IPCMessage = OrchestratorToWorker | WorkerToOrchestrator;
