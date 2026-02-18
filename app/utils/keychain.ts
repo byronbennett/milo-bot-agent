@@ -320,6 +320,41 @@ export async function deleteGeminiKey(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Generic tool key helpers (namespaced: milo-bot-tool:<toolName>:<keyName>)
+// ---------------------------------------------------------------------------
+
+function toolAccount(toolName: string, keyName: string): string {
+  return `milo-bot-tool:${toolName}:${keyName}`;
+}
+
+/**
+ * Store an API key for a tool in the OS keychain.
+ *
+ * @param toolName - Tool identifier (e.g. "serper", "browserless")
+ * @param keyName  - Key identifier within that tool (e.g. "api-key")
+ * @param value    - The secret value
+ */
+export async function saveToolKey(toolName: string, keyName: string, value: string): Promise<void> {
+  return saveCredential(toolAccount(toolName, keyName), value);
+}
+
+/**
+ * Load an API key for a tool from the OS keychain.
+ *
+ * @returns The secret value, or null if not found / keychain unavailable.
+ */
+export async function loadToolKey(toolName: string, keyName: string): Promise<string | null> {
+  return loadCredential(toolAccount(toolName, keyName));
+}
+
+/**
+ * Delete an API key for a tool from the OS keychain.
+ */
+export async function deleteToolKey(toolName: string, keyName: string): Promise<void> {
+  return deleteCredential(toolAccount(toolName, keyName));
+}
+
+// ---------------------------------------------------------------------------
 // Shared utilities
 // ---------------------------------------------------------------------------
 
