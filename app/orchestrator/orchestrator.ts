@@ -374,9 +374,10 @@ export class Orchestrator {
     if (this.config.update?.restartCommand) {
       this.logger.info(`Running restart command: ${this.config.update.restartCommand}`);
       try {
-        execSync(this.config.update.restartCommand, { stdio: 'inherit' });
+        execSync(this.config.update.restartCommand, { stdio: 'inherit', timeout: 30_000 });
       } catch (err) {
         this.logger.error('Restart command failed:', err);
+        this.broadcastEvent('Restart command failed. Agent will still exit.');
       }
     }
 
