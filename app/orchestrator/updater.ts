@@ -5,8 +5,8 @@
  * the appropriate update commands.
  */
 
-import { execSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { spawn, execSync } from 'child_process';
+import { existsSync, readFileSync, writeFileSync, chmodSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -126,6 +126,91 @@ export function getCurrentVersion(packageRoot: string, method: InstallMethod): s
   } catch {
     return 'unknown';
   }
+}
+
+export interface DaemonOptions {
+  agentPid: number;
+  packageRoot: string;
+  method: InstallMethod;
+  startCommand: string[]; // [node, script, ...args]
+  workspaceDir: string;
+}
+
+/**
+ * Spawn a detached update daemon script.
+ *
+ * The daemon waits for the current agent process to exit, runs the
+ * appropriate update commands (git pull + build, or npm update -g),
+ * then restarts the agent using the original process.argv.
+ * If the update/build fails it still restarts on the old code so the
+ * agent doesn't stay dead.
+ */
+export function spawnUpdateDaemon(opts: DaemonOptions): void {
+  const { agentPid, packageRoot, method, startCommand, workspaceDir } = opts;
+  const scriptPath = join(workspaceDir, '.update-daemon.sh');
+  const logPath = join(workspaceDir, 'update.log');
+
+  // Shell-escape each arg for the start command
+  const quotedStart = startCommand.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+
+  const updateSteps =
+    method === 'git'
+      ? `
+git pull >> "$LOG" 2>&1
+if [ $? -ne 0 ]; then
+  echo "[$TS] ERROR: git pull failed" >> "$LOG"
+fi
+
+pnpm install --frozen-lockfile >> "$LOG" 2>&1
+if [ $? -ne 0 ]; then
+  echo "[$TS] ERROR: pnpm install failed" >> "$LOG"
+fi
+
+pnpm build >> "$LOG" 2>&1
+if [ $? -ne 0 ]; then
+  echo "[$TS] ERROR: pnpm build failed" >> "$LOG"
+fi
+`
+      : `
+npm update -g milo-bot-agent >> "$LOG" 2>&1
+if [ $? -ne 0 ]; then
+  echo "[$TS] ERROR: npm update failed" >> "$LOG"
+fi
+`;
+
+  const script = `#!/bin/bash
+LOG='${logPath.replace(/'/g, "'\\''")}'
+TS=$(date -u +%FT%TZ)
+echo "[$TS] Update daemon started (agent PID: ${agentPid})" > "$LOG"
+
+# Wait for agent to exit
+while kill -0 ${agentPid} 2>/dev/null; do sleep 1; done
+TS=$(date -u +%FT%TZ)
+echo "[$TS] Agent exited, starting update..." >> "$LOG"
+
+cd '${packageRoot.replace(/'/g, "'\\''")}'
+${updateSteps}
+# Restart agent
+TS=$(date -u +%FT%TZ)
+echo "[$TS] Restarting agent..." >> "$LOG"
+nohup ${quotedStart} >> "$LOG" 2>&1 &
+AGENT_NEW_PID=$!
+TS=$(date -u +%FT%TZ)
+echo "[$TS] Agent restarted (PID: $AGENT_NEW_PID)" >> "$LOG"
+
+# Cleanup
+rm -f '${scriptPath.replace(/'/g, "'\\''")}'
+exit 0
+`;
+
+  writeFileSync(scriptPath, script, 'utf-8');
+  chmodSync(scriptPath, 0o755);
+
+  const child = spawn('bash', [scriptPath], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
 }
 
 /**

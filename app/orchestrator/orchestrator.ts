@@ -12,7 +12,6 @@
  */
 
 import { existsSync, unlinkSync, mkdirSync } from 'fs';
-import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
@@ -33,7 +32,7 @@ import {
   insertSessionMessage,
 } from '../db/sessions-db.js';
 import { SessionActorManager } from './session-actor.js';
-import { getPackageRoot, detectInstallMethod, runUpdate, getCurrentVersion, getLatestVersion, UPDATE_CHECK_INTERVAL_MS, type InstallMethod } from './updater.js';
+import { getPackageRoot, detectInstallMethod, getCurrentVersion, getLatestVersion, spawnUpdateDaemon, UPDATE_CHECK_INTERVAL_MS, type InstallMethod } from './updater.js';
 import type { WorkerToOrchestrator } from './ipc-types.js';
 import type { WorkItem, WorkItemType, WorkerState } from './session-types.js';
 import { HeartbeatScheduler } from '../scheduler/heartbeat.js';
@@ -352,7 +351,8 @@ export class Orchestrator {
   }
 
   /**
-   * Handle self-update: pull latest code, rebuild, and restart.
+   * Handle self-update: spawn a detached daemon to update + restart,
+   * then shut down so the daemon can take over.
    */
   private async handleSelfUpdate(force?: boolean): Promise<void> {
     this.logger.info(`Self-update requested (force=${force ?? false})`);
@@ -375,41 +375,31 @@ export class Orchestrator {
 
     const packageRoot = getPackageRoot();
     const method = detectInstallMethod(packageRoot);
-    this.logger.info(`Detected install method: ${method} (root: ${packageRoot})`);
 
-    const result = runUpdate(packageRoot, method, (progress) => {
-      this.logger.info(`Update: ${progress}`);
-      this.broadcastEvent(`Update: ${progress}`);
-    });
-
-    if (!result.success) {
-      const errorMsg = `Update failed: ${result.error}\n\nThe agent is still running the previous version.`;
-      this.logger.error(errorMsg);
-      this.broadcastEvent(errorMsg);
-      return;
-    }
-
-    const successMsg = result.output.includes('Already up to date')
-      ? 'Agent is already up to date.'
-      : `Update complete (${method}). Restarting...`;
-    this.logger.info(successMsg);
-    this.broadcastEvent(successMsg);
-
-    // Don't restart if already up to date
-    if (result.output.includes('Already up to date')) {
-      return;
-    }
-
-    // Restart
-    if (this.config.update?.restartCommand) {
-      this.logger.info(`Running restart command: ${this.config.update.restartCommand}`);
-      try {
-        execSync(this.config.update.restartCommand, { stdio: 'inherit', timeout: 30_000 });
-      } catch (err) {
-        this.logger.error('Restart command failed:', err);
-        this.broadcastEvent('Restart command failed. Agent will still exit.');
+    // Quick version check — skip if already up to date
+    try {
+      const latest = await getLatestVersion(method);
+      if (latest !== 'unknown' && latest === this.currentVersion) {
+        const msg = 'Agent is already up to date.';
+        this.logger.info(msg);
+        this.broadcastEvent(msg);
+        return;
       }
+    } catch {
+      // If version check fails, proceed with update anyway
+      this.logger.verbose('Version check failed, proceeding with update');
     }
+
+    this.logger.info(`Shutting down for update (${method}, root: ${packageRoot})`);
+    this.broadcastEvent('Shutting down for update...');
+
+    spawnUpdateDaemon({
+      agentPid: process.pid,
+      packageRoot,
+      method,
+      startCommand: process.argv,
+      workspaceDir: this.config.workspace.baseDir,
+    });
 
     await this.stop();
     process.exit(0);
