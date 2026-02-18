@@ -76,6 +76,10 @@ export const pubnubConfigSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
+export const updateConfigSchema = z.object({
+  restartCommand: z.string().optional(),
+});
+
 export const agentConfigSchema = z.object({
   agentName: z.string().min(1).max(100),
   agentId: z.string().optional(),
@@ -91,6 +95,7 @@ export const agentConfigSchema = z.object({
   ai: aiConfigSchema.default({}),
   messaging: messagingConfigSchema.default({}),
   pubnub: pubnubConfigSchema.default({}),
+  update: updateConfigSchema.default({}),
   streaming: z.boolean().default(false),
   onboardingComplete: z.boolean().default(false),
 });
@@ -103,3 +108,4 @@ export type TasksConfig = z.infer<typeof tasksConfigSchema>;
 export type ToolsConfig = z.infer<typeof toolsConfigSchema>;
 export type AIConfig = z.infer<typeof aiConfigSchema>;
 export type MessagingConfig = z.infer<typeof messagingConfigSchema>;
+export type UpdateConfig = z.infer<typeof updateConfigSchema>;

@@ -33,4 +33,21 @@ describe('Config Schema', () => {
     });
     expect(config.ai.model).toBe('claude-sonnet-4-6');
   });
+
+  it('accepts update.restartCommand config', () => {
+    const config = agentConfigSchema.parse({
+      agentName: 'test',
+      workspace: { baseDir: '/tmp' },
+      update: { restartCommand: 'pm2 restart milo' },
+    });
+    expect(config.update.restartCommand).toBe('pm2 restart milo');
+  });
+
+  it('defaults update config to empty', () => {
+    const config = agentConfigSchema.parse({
+      agentName: 'test',
+      workspace: { baseDir: '/tmp' },
+    });
+    expect(config.update.restartCommand).toBeUndefined();
+  });
 });
