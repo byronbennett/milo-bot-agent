@@ -15,10 +15,10 @@ importers:
         specifier: ^7.2.1
         version: 7.10.1(@types/node@22.19.9)
       '@mariozechner/pi-agent-core':
-        specifier: ^0.52.12
+        specifier: 0.52.12
         version: 0.52.12(ws@8.19.0)(zod@3.25.76)
       '@mariozechner/pi-ai':
-        specifier: ^0.52.12
+        specifier: 0.52.12
         version: 0.52.12(ws@8.19.0)(zod@3.25.76)
       '@sinclair/typebox':
         specifier: 0.34.48
