@@ -69,7 +69,7 @@ ESM throughout (`"type": "module"`). TypeScript targets ES2022, bundled with tsu
 - `scheduler/` — Heartbeat scheduling (default 3 min, 5s with PubNub).
 - `utils/ai-client.ts` — pi-ai wrapper for utility AI calls (intent parsing, prompt enhancement).
 - `utils/logger.ts` — Color-coded singleton logger with levels.
-- `utils/keychain.ts` — macOS `security` command integration.
+- `utils/keychain.ts` — Cross-platform OS keychain integration (macOS `security`, Windows `cmdkey`/PowerShell, Linux `secret-tool`). Stores system keys (MILO_API_KEY, ANTHROPIC_API_KEY, etc.) and tool-specific keys under namespaced accounts.
 
 **Legacy (deprecated):**
 - `claude-code/` — Former claude-code-js SDK bridge. Replaced by pi-agent-core in workers. Stubs remain for backward compatibility with `agent.ts` and `task/executor.ts`.
@@ -89,6 +89,25 @@ ESM throughout (`"type": "module"`). TypeScript targets ES2022, bundled with tsu
 - **Zod schemas** for all config validation with defaults merging.
 - **Self-update** — `UPDATE_MILO_AGENT` PubNub control message triggers git pull + rebuild (or npm update). Warns if workers are busy unless `force: true`. Restarts via configurable `update.restartCommand` or `process.exit(0)`.
 - **Version tracking** — On startup, detects current version (git SHA or npm semver). Hourly checks GitHub API or npm registry for latest version. One-time PubNub notification on new version. Reports to `POST /api/agent/update-status`.
+
+## Tool Key Storage
+
+Agent-tools that need API keys should store/retrieve them via the OS keychain using the helpers in `utils/keychain.ts`. Keys are namespaced as `milo-bot-tool:<toolName>:<keyName>` to stay separate from system keys.
+
+```typescript
+import { saveToolKey, loadToolKey, deleteToolKey } from '../utils/keychain.js';
+
+// Store a key
+await saveToolKey('serper', 'api-key', 'sk-...');
+
+// Retrieve a key (returns null if not found)
+const key = await loadToolKey('serper', 'api-key');
+
+// Delete a key
+await deleteToolKey('serper', 'api-key');
+```
+
+System-level keys (MILO_API_KEY, ANTHROPIC_API_KEY, etc.) use their own dedicated helpers (`saveApiKey`, `loadAnthropicKey`, etc.) and are loaded automatically at startup in `config/index.ts`.
 
 ## Testing
 
