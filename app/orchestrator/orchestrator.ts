@@ -12,6 +12,7 @@
  */
 
 import { existsSync, unlinkSync, mkdirSync } from 'fs';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
@@ -32,6 +33,7 @@ import {
   insertSessionMessage,
 } from '../db/sessions-db.js';
 import { SessionActorManager } from './session-actor.js';
+import { getPackageRoot, detectInstallMethod, runUpdate } from './updater.js';
 import type { WorkerToOrchestrator } from './ipc-types.js';
 import type { WorkItem, WorkItemType, WorkerState } from './session-types.js';
 import { HeartbeatScheduler } from '../scheduler/heartbeat.js';
@@ -270,6 +272,8 @@ export class Orchestrator {
 
     if (message.ui_action === 'DELETE_SESSION' || message.type === 'session_deleted') {
       await this.handleDeleteSession(message.sessionId, message.sessionName);
+    } else if (message.ui_action === 'UPDATE_MILO_AGENT') {
+      await this.handleSelfUpdate(message.force);
     } else if (message.type === 'ui_action') {
       await this.handleUiAction(message as unknown as PubNubSkillCommand);
     } else {
@@ -315,6 +319,69 @@ export class Orchestrator {
         timestamp: new Date().toISOString(),
       });
     }
+  }
+
+  /**
+   * Handle self-update: pull latest code, rebuild, and restart.
+   */
+  private async handleSelfUpdate(force?: boolean): Promise<void> {
+    this.logger.info(`Self-update requested (force=${force ?? false})`);
+
+    // Check for busy sessions
+    const activeSessions = this.actorManager.listActive();
+    const busySessions = activeSessions.filter(
+      (a) => a.status === 'OPEN_RUNNING'
+    );
+
+    if (busySessions.length > 0 && !force) {
+      const sessionList = busySessions
+        .map((a) => `- ${a.sessionName} (${a.sessionId})`)
+        .join('\n');
+      const warning = `Cannot update: ${busySessions.length} session(s) are currently running:\n${sessionList}\n\nSend the update command with force=true to update anyway.`;
+      this.logger.warn(warning);
+      this.broadcastEvent(warning);
+      return;
+    }
+
+    const packageRoot = getPackageRoot();
+    const method = detectInstallMethod(packageRoot);
+    this.logger.info(`Detected install method: ${method} (root: ${packageRoot})`);
+
+    const result = runUpdate(packageRoot, method, (progress) => {
+      this.logger.info(`Update: ${progress}`);
+      this.broadcastEvent(`Update: ${progress}`);
+    });
+
+    if (!result.success) {
+      const errorMsg = `Update failed: ${result.error}\n\nThe agent is still running the previous version.`;
+      this.logger.error(errorMsg);
+      this.broadcastEvent(errorMsg);
+      return;
+    }
+
+    const successMsg = result.output.includes('Already up to date')
+      ? 'Agent is already up to date.'
+      : `Update complete (${method}). Restarting...`;
+    this.logger.info(successMsg);
+    this.broadcastEvent(successMsg);
+
+    // Don't restart if already up to date
+    if (result.output.includes('Already up to date')) {
+      return;
+    }
+
+    // Restart
+    if (this.config.update?.restartCommand) {
+      this.logger.info(`Running restart command: ${this.config.update.restartCommand}`);
+      try {
+        execSync(this.config.update.restartCommand, { stdio: 'inherit' });
+      } catch (err) {
+        this.logger.error('Restart command failed:', err);
+      }
+    }
+
+    await this.stop();
+    process.exit(0);
   }
 
   /**
@@ -720,6 +787,17 @@ export class Orchestrator {
     if (this.pubnubAdapter?.isConnected) {
       this.pubnubAdapter.sendMessage(content, sessionId).catch((err) => {
         this.logger.warn('PubNub publish failed:', err);
+      });
+    }
+  }
+
+  /**
+   * Broadcast an event to all connected clients (no specific session).
+   */
+  private broadcastEvent(content: string): void {
+    if (this.pubnubAdapter?.isConnected) {
+      this.pubnubAdapter.publishAgentStatus(content).catch((err) => {
+        this.logger.warn('PubNub broadcast failed:', err);
       });
     }
   }
