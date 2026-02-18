@@ -301,6 +301,9 @@ export class Orchestrator {
     } else if (message.type === 'ui_action' && (message as unknown as Record<string, unknown>).action === 'check_milo_agent_updates') {
       this.logger.info('Manual update check requested');
       await this.handleCheckForUpdates(message as unknown as Record<string, unknown>);
+    } else if (message.type === 'ui_action' && (message as unknown as Record<string, unknown>).action === 'update_milo_agent') {
+      this.logger.info('Update requested via ui_action');
+      await this.handleSelfUpdate((message as unknown as Record<string, unknown>).force as boolean | undefined);
     } else if (message.type === 'ui_action') {
       await this.handleUiAction(message as unknown as PubNubSkillCommand);
     } else {
