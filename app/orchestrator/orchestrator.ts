@@ -298,9 +298,9 @@ export class Orchestrator {
       await this.handleDeleteSession(message.sessionId, message.sessionName);
     } else if (message.ui_action === 'UPDATE_MILO_AGENT') {
       await this.handleSelfUpdate(message.force);
-    } else if (message.ui_action === 'check_milo_agent_updates') {
+    } else if (message.type === 'ui_action' && (message as unknown as Record<string, unknown>).action === 'check_milo_agent_updates') {
       this.logger.info('Manual update check requested');
-      await this.checkForUpdates();
+      await this.handleCheckForUpdates(message as unknown as Record<string, unknown>);
     } else if (message.type === 'ui_action') {
       await this.handleUiAction(message as unknown as PubNubSkillCommand);
     } else {
@@ -427,6 +427,8 @@ export class Orchestrator {
       this.latestVersion = latest;
       this.needsUpdate = this.currentVersion !== latest;
 
+      this.logger.info(`Update check: current=${this.currentVersion}, latest=${latest}, needsUpdate=${this.needsUpdate}`);
+
       // Notify once when update becomes available
       if (this.needsUpdate && !previousNeedsUpdate) {
         const msg = `A newer version is available (current: ${this.currentVersion}, latest: ${this.latestVersion})`;
@@ -441,11 +443,54 @@ export class Orchestrator {
           latestVersion: this.latestVersion,
           needsUpdate: this.needsUpdate,
         });
+        this.logger.verbose('Update status reported to web app');
       } catch (err) {
         this.logger.verbose('Failed to report update status:', err);
       }
     } catch (err) {
       this.logger.verbose('Update check failed:', err);
+    }
+  }
+
+  /**
+   * Handle a manual "check for updates" request from the web app.
+   * Runs the update check and publishes the result back via PubNub.
+   */
+  private async handleCheckForUpdates(raw: Record<string, unknown>): Promise<void> {
+    const requestId = raw.requestId as string | undefined;
+
+    try {
+      await this.checkForUpdates();
+
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'ui_action_result',
+          agentId: this.agentId,
+          action: 'check_milo_agent_updates',
+          requestId: requestId ?? '',
+          currentVersion: this.currentVersion,
+          latestVersion: this.latestVersion,
+          needsUpdate: this.needsUpdate,
+          success: true,
+          error: null,
+          timestamp: new Date().toISOString(),
+        } as unknown as import('../messaging/pubnub-types.js').PubNubEventMessage);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error('Update check failed:', errorMsg);
+
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'ui_action_result',
+          agentId: this.agentId,
+          action: 'check_milo_agent_updates',
+          requestId: requestId ?? '',
+          success: false,
+          error: errorMsg,
+          timestamp: new Date().toISOString(),
+        } as unknown as import('../messaging/pubnub-types.js').PubNubEventMessage);
+      }
     }
   }
 
