@@ -5,7 +5,9 @@ import { createSearchTools } from './search-tools.js';
 import { createGitTools } from './git-tools.js';
 import { createNotifyTool } from './notify-tool.js';
 import { createCliAgentTools } from './cli-agent-tools.js';
-import { createClaudeCodeOAuthTool } from './claude-code-oauth-tool.js';
+// DISABLED: OAuth-based use of the `claude` CLI binary is forbidden by Claude Code TOS
+// when invoked by an orchestrating agent. Only the API-key-based SDK is permitted.
+// import { createClaudeCodeOAuthTool } from './claude-code-oauth-tool.js';
 import { createBrowserTool } from './browser-tool.js';
 import { createSetProjectTool } from './project-tool.js';
 
@@ -45,9 +47,12 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
     ...createSearchTools(ctx.projectPath),
     ...createGitTools(ctx.projectPath),
   ];
-  const cliTools = ctx.preferAPIKeyClaude
-    ? createCliAgentTools(ctx)
-    : [createClaudeCodeOAuthTool(ctx), ...createCliAgentTools(ctx).filter((t) => t.name !== 'claude_code_cli')];
+  // DISABLED: OAuth-based `claude` CLI tool is forbidden by Claude Code TOS when
+  // invoked by an orchestrating agent. Always use the API-key-based SDK tools.
+  // const cliTools = ctx.preferAPIKeyClaude
+  //   ? createCliAgentTools(ctx)
+  //   : [createClaudeCodeOAuthTool(ctx), ...createCliAgentTools(ctx).filter((t) => t.name !== 'claude_code_cli')];
+  const cliTools = createCliAgentTools(ctx);
   const uiTools = [createNotifyTool(ctx.sendNotification)];
   const setProjectTool = createSetProjectTool(ctx, {
     onProjectSet: (projectName, newProjectPath, isNew) => {

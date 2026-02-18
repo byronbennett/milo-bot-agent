@@ -27,7 +27,9 @@ export const defaultConfig: AgentConfig = {
     maxConcurrentSessions: 3,
     startupMaxRetries: 5,
     startupRetryIntervalSeconds: 30,
-    preferAPIKey: false,
+    // NOTE: Must be true. OAuth-based use of the `claude` CLI binary is forbidden
+    // by Claude Code TOS when invoked by an orchestrating agent.
+    preferAPIKey: true,
   },
   scheduler: {
     heartbeatIntervalMinutes: 3,

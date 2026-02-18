@@ -18,7 +18,10 @@ export const claudeCodeConfigSchema = z.object({
   maxConcurrentSessions: z.number().min(1).max(10).default(3),
   startupMaxRetries: z.number().min(1).max(10).default(5),
   startupRetryIntervalSeconds: z.number().min(10).max(120).default(30),
-  preferAPIKey: z.boolean().default(false),
+  // NOTE: Must default to true. The Claude Code TOS forbids OAuth-based use of the
+  // `claude` CLI binary when it is invoked by an orchestrating agent. Only the
+  // API-key-based SDK approach (@anthropic-ai/claude-agent-sdk) is permitted.
+  preferAPIKey: z.boolean().default(true),
 });
 
 export const schedulerConfigSchema = z.object({

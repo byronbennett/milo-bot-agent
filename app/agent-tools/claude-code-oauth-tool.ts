@@ -1,6 +1,16 @@
 /**
- * Claude Code OAuth Tool
+ * Claude Code OAuth Tool — DISABLED
  *
+ * ⚠️  CLAUDE CODE TOS RESTRICTION: OAuth-based use of the `claude` CLI binary
+ * is forbidden by the Claude Code Terms of Service when it is invoked by an
+ * orchestrating agent. This file is retained for reference but the tool is not
+ * loaded at runtime. See agent-tools/index.ts for the disabled import.
+ *
+ * Use the API-key-based SDK tool (cli-agent-tools.ts / @anthropic-ai/claude-agent-sdk)
+ * instead.
+ *
+ * ---
+ * Original description:
  * Spawns the `claude` CLI binary directly using `-p` (print/headless) mode,
  * which inherits the user's existing OAuth session from `claude login`.
  * No ANTHROPIC_API_KEY needed.
