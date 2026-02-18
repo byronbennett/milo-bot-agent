@@ -153,7 +153,13 @@ export class Orchestrator {
       this.logger.info(`Connected as agent: ${hb.agentId}`);
       await this.syncModelsToServer();
     } catch (err) {
-      this.logger.warn('Could not reach server, will retry:', err);
+      const apiUrl = this.config.messaging.webapp.apiUrl;
+      this.logger.warn(`Could not reach server at ${apiUrl}:`, err);
+      if (!this.isDefaultServerUrl(apiUrl)) {
+        this.logger.warn(
+          'You are using a custom server URL. If you intended to connect to the official MiloBot server, run `milo init` and set the server URL to https://www.milobot.dev'
+        );
+      }
     }
 
     // 4. Connect PubNub if enabled
@@ -944,7 +950,13 @@ export class Orchestrator {
         }
       }
     } catch (err) {
-      this.logger.error('Heartbeat failed:', err);
+      const apiUrl = this.config.messaging.webapp.apiUrl;
+      this.logger.error(`Heartbeat failed (server: ${apiUrl}):`, err);
+      if (!this.isDefaultServerUrl(apiUrl)) {
+        this.logger.error(
+          'You are using a custom server URL. If you intended to connect to the official MiloBot server, run `milo init` and set the server URL to https://www.milobot.dev'
+        );
+      }
     }
   }
 
@@ -1033,6 +1045,12 @@ export class Orchestrator {
     }, 10_000);
 
     this.orphanMonitors.set(sessionId, timer);
+  }
+
+  // --- Helpers ---
+
+  private isDefaultServerUrl(apiUrl: string): boolean {
+    return /^https?:\/\/(www\.)?milobot\.dev(\/|$)/.test(apiUrl);
   }
 
   // --- Shutdown ---

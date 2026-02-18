@@ -539,7 +539,7 @@ export async function runInit(options: {
         });
       } else {
         const hasKey = await confirm({
-          message: 'Do you have an API key from milobot.dev?',
+          message: `Do you have an API key from ${serverUrl}?`,
           default: false,
         });
 
@@ -968,14 +968,14 @@ dist/
 
 export const initCommand = new Command('init')
   .description('Initialize MiloBot agent workspace')
-  .option('-k, --api-key <key>', 'API key from milobot.dev')
+  .option('-s, --server-url <url>', 'MiloBot server URL (default: https://www.milobot.dev)')
+  .option('-k, --api-key <key>', 'MiloBot API key')
   .option('--anthropic-key <key>', 'Anthropic API key for Milo AI features')
   .option('--openai-key <key>', 'OpenAI API key (enables GPT models)')
   .option('--gemini-key <key>', 'Gemini API key (enables Google Gemini models)')
   .option('--ai-model <model>', 'Model for Milo AI calls (not Claude Code)')
   .option('-d, --dir <directory>', 'Workspace directory')
   .option('-n, --name <name>', 'Agent name')
-  .option('-s, --server-url <url>', 'Server URL (default: https://www.milobot.dev)')
   .option('-y, --yes', 'Use defaults, non-interactive mode')
   .option('--no-browser', 'Skip opening browser for API key')
   .action(runInit);

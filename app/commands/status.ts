@@ -84,7 +84,8 @@ export const statusCommand = new Command('status')
       if (miloKeyStatus === 'Not configured' || anthropicKeyStatus === 'Not configured') {
         console.log('Next steps:');
         if (miloKeyStatus === 'Not configured') {
-          console.log('  - Get a MiloBot API key from https://www.milobot.dev/settings');
+          const settingsUrl = config.messaging.webapp.apiUrl.replace(/\/api\/?$/, '');
+          console.log(`  - Get a MiloBot API key from ${settingsUrl}/settings`);
         }
         if (anthropicKeyStatus === 'Not configured') {
           console.log('  - Get an Anthropic API key from https://console.anthropic.com/');
