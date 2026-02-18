@@ -1,5 +1,5 @@
 import type { MessagingAdapter } from './adapter';
-import type { HeartbeatResponse, PendingMessage } from '../shared';
+import type { HeartbeatResponse, PendingMessage, UpdateStatusRequest, UpdateStatusResponse } from '../shared';
 
 export interface WebAppAdapterOptions {
   apiUrl: string;
@@ -114,5 +114,12 @@ export class WebAppAdapter implements MessagingAdapter {
     models: Array<{ provider: string; modelId: string; displayName: string }>
   ): Promise<void> {
     await this.request('POST', '/agent/models', { models });
+  }
+
+  /**
+   * Report agent version and update status to web app
+   */
+  async sendUpdateStatus(status: UpdateStatusRequest): Promise<void> {
+    await this.request<UpdateStatusResponse>('POST', '/agent/update-status', status);
   }
 }
