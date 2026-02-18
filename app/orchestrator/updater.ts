@@ -6,7 +6,7 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -93,5 +93,69 @@ export function runUpdate(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, method, output: output.join('\n'), error: message };
+  }
+}
+
+const GITHUB_REPO = 'byronbennett/milo-bot-agent';
+const NPM_PACKAGE = 'milo-bot-agent';
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+export { UPDATE_CHECK_INTERVAL_MS };
+
+/**
+ * Get the current version of the agent.
+ * Git installs: short commit SHA. npm installs: package.json version.
+ */
+export function getCurrentVersion(packageRoot: string, method: InstallMethod): string {
+  if (method === 'git') {
+    try {
+      return execSync('git rev-parse --short HEAD', {
+        cwd: packageRoot,
+        encoding: 'utf-8',
+        timeout: 5_000,
+      }).trim();
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  // npm: read version from package.json
+  try {
+    const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf-8'));
+    return pkg.version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Check the remote for the latest version.
+ * Git: GitHub API for latest commit on master. npm: npm registry.
+ */
+export async function getLatestVersion(method: InstallMethod): Promise<string> {
+  try {
+    if (method === 'git') {
+      const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/commits/master`,
+        {
+          headers: { Accept: 'application/vnd.github.v3+json' },
+          signal: AbortSignal.timeout(10_000),
+        }
+      );
+      if (!res.ok) return 'unknown';
+      const data = await res.json() as { sha: string };
+      return data.sha.slice(0, 7);
+    }
+
+    // npm registry
+    const res = await fetch(
+      `https://registry.npmjs.org/${NPM_PACKAGE}/latest`,
+      { signal: AbortSignal.timeout(10_000) }
+    );
+    if (!res.ok) return 'unknown';
+    const data = await res.json() as { version: string };
+    return data.version ?? 'unknown';
+  } catch {
+    return 'unknown';
   }
 }
