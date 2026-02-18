@@ -8,6 +8,7 @@ describe('loadTools', () => {
     const names = tools.map((t) => t.name);
     expect(names).toContain('read_file');
     expect(names).toContain('bash');
+    expect(names).toContain('web_fetch');
     expect(names).toContain('claude_code_cli');
     expect(names).toContain('notify_user');
   });
@@ -18,11 +19,12 @@ describe('loadTools', () => {
     expect(tools[0].name).toBe('notify_user');
   });
 
-  it('minimal set includes core + ui but no cli agents', () => {
+  it('minimal set includes core + web_fetch + ui but no cli agents', () => {
     const tools = loadTools('minimal', ctx);
     const names = tools.map((t) => t.name);
     expect(names).toContain('read_file');
     expect(names).toContain('bash');
+    expect(names).toContain('web_fetch');
     expect(names).toContain('notify_user');
     expect(names).not.toContain('claude_code_cli');
   });

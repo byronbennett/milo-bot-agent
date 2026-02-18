@@ -9,6 +9,7 @@ import { createCliAgentTools } from './cli-agent-tools.js';
 // when invoked by an orchestrating agent. Only the API-key-based SDK is permitted.
 // import { createClaudeCodeOAuthTool } from './claude-code-oauth-tool.js';
 import { createBrowserTool } from './browser-tool.js';
+import { createWebFetchTool } from './web-fetch-tool.js';
 import { createSetProjectTool } from './project-tool.js';
 
 export { isDangerousCommand } from './bash-tool.js';
@@ -62,16 +63,16 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
 
   switch (toolSet) {
     case 'full':
-      return [...coreTools, setProjectTool, ...cliTools, uiTools[0], createBrowserTool()];
+      return [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, uiTools[0], createBrowserTool()];
     case 'chat':
       return [...uiTools];
     case 'minimal':
-      return [...coreTools, setProjectTool, ...uiTools];
+      return [...coreTools, createWebFetchTool(), setProjectTool, ...uiTools];
     default:
       if (Array.isArray(toolSet)) {
-        const all = [...coreTools, setProjectTool, ...cliTools, ...uiTools, createBrowserTool()];
+        const all = [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, ...uiTools, createBrowserTool()];
         return all.filter((t) => toolSet.includes(t.name));
       }
-      return [...coreTools, ...uiTools];
+      return [...coreTools, createWebFetchTool(), ...uiTools];
   }
 }
