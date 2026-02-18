@@ -197,8 +197,10 @@ export class Orchestrator {
     this.logger.info(`Agent version: ${this.currentVersion} (${this.installMethod})`);
 
     // Run first check immediately, then hourly
-    this.checkForUpdates();
-    this.updateCheckTimer = setInterval(() => this.checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+    this.checkForUpdates().catch((err) => this.logger.verbose('Initial update check failed:', err));
+    this.updateCheckTimer = setInterval(() => {
+      this.checkForUpdates().catch((err) => this.logger.verbose('Periodic update check failed:', err));
+    }, UPDATE_CHECK_INTERVAL_MS);
   }
 
   async stop(): Promise<void> {
