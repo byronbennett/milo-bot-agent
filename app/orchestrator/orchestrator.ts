@@ -1136,9 +1136,9 @@ export class Orchestrator {
   }
 
   /**
-   * Get available tool names by constructing a minimal dummy context.
+   * Get available tools with name, label, and description.
    */
-  private getAvailableToolNames(): string[] {
+  private getAvailableTools(): { name: string; label: string; description: string }[] {
     const dummyCtx: ToolContext = {
       projectPath: join(this.config.workspace.baseDir, this.config.workspace.projectsDir),
       workspaceDir: this.config.workspace.baseDir,
@@ -1150,9 +1150,13 @@ export class Orchestrator {
       askUser: async () => '',
     };
     try {
-      return loadTools('full', dummyCtx).map((t) => t.name);
+      return loadTools('full', dummyCtx).map((t) => ({
+        name: t.name,
+        label: t.label,
+        description: t.description,
+      }));
     } catch {
-      return ['(unable to enumerate)'];
+      return [];
     }
   }
 
@@ -1197,10 +1201,39 @@ export class Orchestrator {
     }
 
     // --- Tools ---
-    const toolNames = this.getAvailableToolNames();
+    const tools = this.getAvailableTools();
     lines.push('');
-    lines.push(`#### Tools — ${toolNames.length} registered`);
-    lines.push(toolNames.map((t) => `\`${t}\``).join(' · '));
+    lines.push(`#### Tools — ${tools.length} registered`);
+    if (tools.length === 0) {
+      lines.push('*(unable to enumerate)*');
+    } else {
+      const coreNames = new Set([
+        'read_file', 'write_file', 'bash', 'list_files', 'grep',
+        'git_status', 'git_diff', 'git_commit', 'git_log',
+      ]);
+      const agentNames = new Set(['claude_code_cli', 'gemini_cli', 'codex_cli']);
+
+      const core = tools.filter((t) => coreNames.has(t.name));
+      const agents = tools.filter((t) => agentNames.has(t.name));
+      const utility = tools.filter((t) => !coreNames.has(t.name) && !agentNames.has(t.name));
+
+      if (core.length > 0) {
+        lines.push(`**Core:** ${core.map((t) => `\`${t.name}\``).join(' · ')}`);
+      }
+      if (agents.length > 0) {
+        lines.push('**Agents:**');
+        for (const t of agents) {
+          let desc = `\`${t.name}\` — ${t.label}`;
+          if (t.name === 'claude_code_cli') {
+            desc += '. Uses your Anthropic API key (configured during `milo init`). Tokens consumed by Claude Code are billed to your API account at the rate of the model you select.';
+          }
+          lines.push(`- ${desc}`);
+        }
+      }
+      if (utility.length > 0) {
+        lines.push(`**Utility:** ${utility.map((t) => `\`${t.name}\``).join(' · ')}`);
+      }
+    }
 
     // --- Skills ---
     const skillsDir = join(this.config.workspace.baseDir, this.config.workspace.skillsDir);
