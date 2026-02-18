@@ -33,7 +33,7 @@ import {
   insertSessionMessage,
 } from '../db/sessions-db.js';
 import { SessionActorManager } from './session-actor.js';
-import { getPackageRoot, detectInstallMethod, runUpdate } from './updater.js';
+import { getPackageRoot, detectInstallMethod, runUpdate, getCurrentVersion, getLatestVersion, UPDATE_CHECK_INTERVAL_MS, type InstallMethod } from './updater.js';
 import type { WorkerToOrchestrator } from './ipc-types.js';
 import type { WorkItem, WorkItemType, WorkerState } from './session-types.js';
 import { HeartbeatScheduler } from '../scheduler/heartbeat.js';
@@ -69,6 +69,11 @@ export class Orchestrator {
   private orphanedSessionIds = new Set<string>();
   private skillInstaller!: SkillInstaller;
   private agentId: string = '';
+  private currentVersion: string = 'unknown';
+  private latestVersion: string = 'unknown';
+  private needsUpdate = false;
+  private installMethod: InstallMethod = 'git';
+  private updateCheckTimer: NodeJS.Timeout | null = null;
 
   constructor(options: OrchestratorOptions) {
     this.config = options.config;
@@ -184,6 +189,16 @@ export class Orchestrator {
 
     this.isRunning = true;
     this.logger.info('Orchestrator started');
+
+    // 8. Detect version and start update checker
+    const packageRoot = getPackageRoot();
+    this.installMethod = detectInstallMethod(packageRoot);
+    this.currentVersion = getCurrentVersion(packageRoot, this.installMethod);
+    this.logger.info(`Agent version: ${this.currentVersion} (${this.installMethod})`);
+
+    // Run first check immediately, then hourly
+    this.checkForUpdates();
+    this.updateCheckTimer = setInterval(() => this.checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
   }
 
   async stop(): Promise<void> {
@@ -198,6 +213,7 @@ export class Orchestrator {
     }
 
     if (this.outboxTimer) clearInterval(this.outboxTimer);
+    if (this.updateCheckTimer) clearInterval(this.updateCheckTimer);
 
     // Clean up orphan monitors
     for (const timer of this.orphanMonitors.values()) {
@@ -383,6 +399,43 @@ export class Orchestrator {
 
     await this.stop();
     process.exit(0);
+  }
+
+  /**
+   * Check for available updates and report status.
+   */
+  private async checkForUpdates(): Promise<void> {
+    try {
+      const latest = await getLatestVersion(this.installMethod);
+      if (latest === 'unknown') {
+        this.logger.verbose('Update check: could not determine latest version');
+        return;
+      }
+
+      const previousNeedsUpdate = this.needsUpdate;
+      this.latestVersion = latest;
+      this.needsUpdate = this.currentVersion !== latest;
+
+      // Notify once when update becomes available
+      if (this.needsUpdate && !previousNeedsUpdate) {
+        const msg = `A newer version is available (current: ${this.currentVersion}, latest: ${this.latestVersion})`;
+        this.logger.info(msg);
+        this.broadcastEvent(msg);
+      }
+
+      // Report to web app API
+      try {
+        await this.restAdapter.sendUpdateStatus({
+          version: this.currentVersion,
+          latestVersion: this.latestVersion,
+          needsUpdate: this.needsUpdate,
+        });
+      } catch (err) {
+        this.logger.verbose('Failed to report update status:', err);
+      }
+    } catch (err) {
+      this.logger.verbose('Update check failed:', err);
+    }
   }
 
   /**
@@ -1056,6 +1109,10 @@ export class Orchestrator {
     lines.push(`| **Utility Model** | \`${this.config.ai.utility.model}\` |`);
     lines.push(`| **PubNub** | \`${pubStatus}\` |`);
     lines.push(`| **Streaming** | \`${this.config.streaming ? 'on' : 'off'}\` |`);
+    lines.push(`| **Version** | \`${this.currentVersion}\` (${this.installMethod}) |`);
+    if (this.needsUpdate) {
+      lines.push(`| **Latest** | \`${this.latestVersion}\` — **update available** |`);
+    }
 
     // --- Models ---
     const { structured } = this.getAvailableModels();
