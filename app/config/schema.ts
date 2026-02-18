@@ -55,10 +55,10 @@ const aiModelConfigSchema = z.object({
 });
 
 export const aiConfigSchema = z.object({
-  model: z.string().default('claude-sonnet-4-5'),
+  model: z.string().default('claude-sonnet-4-6'),
   agent: aiModelConfigSchema.default({
     provider: 'anthropic',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6-20250514',
   }),
   utility: aiModelConfigSchema.default({
     provider: 'anthropic',

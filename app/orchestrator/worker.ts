@@ -156,7 +156,7 @@ When asked to research something (find YouTube channels, compare options, gather
 
   // Resolve model
   const provider = initConfig.agentProvider ?? 'anthropic';
-  const resolvedModelId = modelId ?? initConfig.agentModel ?? 'claude-sonnet-4-20250514';
+  const resolvedModelId = modelId ?? initConfig.agentModel ?? 'claude-sonnet-4-6-20250514';
   const model = getModel(provider as any, resolvedModelId as any);
 
   // Resolve tool set
@@ -357,7 +357,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
         log(`Persona resolved: ${msg.personaId}@${msg.personaVersionId}`);
       }
 
-      const resolvedModel = msg.model ?? initConfig.agentModel ?? 'claude-sonnet-4-20250514';
+      const resolvedModel = msg.model ?? initConfig.agentModel ?? 'claude-sonnet-4-6-20250514';
       log(`Creating agent with model=${resolvedModel} provider=${initConfig.agentProvider ?? 'anthropic'}`);
       await createAgent(systemPromptText, resolvedModel);
 

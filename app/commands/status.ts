@@ -67,7 +67,7 @@ export const statusCommand = new Command('status')
 
       console.log(`MiloBot API Key: ${miloKeyStatus}`);
       console.log(`Anthropic API Key: ${anthropicKeyStatus}`);
-      console.log(`AI Model: ${config.ai?.model ?? 'claude-sonnet-4-5 (default)'}`);
+      console.log(`AI Model: ${config.ai?.model ?? 'claude-sonnet-4-6 (default)'}`);
       console.log('');
 
       // Check messaging config

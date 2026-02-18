@@ -24,7 +24,7 @@ const ANTHROPIC_KEY_PATTERN = /^sk-ant-[a-zA-Z0-9_-]+$/;
 const OPENAI_KEY_PATTERN = /^sk-/;
 const GEMINI_KEY_PATTERN = /^AIza/;
 
-const DEFAULT_AI_MODEL = 'claude-sonnet-4-5';
+const DEFAULT_AI_MODEL = 'claude-sonnet-4-6';
 
 function validateApiKey(value: string): boolean | string {
   if (!value.trim()) return 'API key is required';
@@ -684,7 +684,7 @@ export async function runInit(options: {
       aiModel = await select({
         message: 'Which model should Milo use for AI calls?',
         choices: [
-          { name: 'Claude Sonnet 4.5 (recommended)', value: 'claude-sonnet-4-5' },
+          { name: 'Claude Sonnet 4.6 (recommended)', value: 'claude-sonnet-4-6' },
           { name: 'Claude Haiku 4.5 (faster, cheaper)', value: 'claude-haiku-4-5' },
           { name: 'Claude Opus 4.6 (most capable)', value: 'claude-opus-4-6' },
           { name: 'Custom model ID...', value: '__custom__' },

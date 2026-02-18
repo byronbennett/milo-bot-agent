@@ -111,7 +111,7 @@ describe('IPC helpers', () => {
       prompt: 'Fix the login bug',
       personaId: 'persona-abc',
       personaVersionId: 'v3',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6-20250514',
     };
 
     sendIPC(stream, msg);
@@ -127,7 +127,7 @@ describe('IPC helpers', () => {
     const task = messages[0] as import('../../app/orchestrator/ipc-types.js').WorkerTaskMessage;
     expect(task.personaId).toBe('persona-abc');
     expect(task.personaVersionId).toBe('v3');
-    expect(task.model).toBe('claude-sonnet-4-20250514');
+    expect(task.model).toBe('claude-sonnet-4-6-20250514');
   });
 
   test('readIPC handles chunked data across line boundaries', async () => {

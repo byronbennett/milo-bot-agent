@@ -7,7 +7,7 @@ describe('Config Schema', () => {
       workspace: { baseDir: '/tmp' },
     });
     expect(config.ai.agent.provider).toBe('anthropic');
-    expect(config.ai.agent.model).toBe('claude-sonnet-4-20250514');
+    expect(config.ai.agent.model).toBe('claude-sonnet-4-6-20250514');
     expect(config.ai.utility.provider).toBe('anthropic');
     expect(config.ai.utility.model).toBe('claude-haiku-4-5-20251001');
   });
@@ -29,8 +29,8 @@ describe('Config Schema', () => {
     const config = agentConfigSchema.parse({
       agentName: 'test',
       workspace: { baseDir: '/tmp' },
-      ai: { model: 'claude-sonnet-4-5' },
+      ai: { model: 'claude-sonnet-4-6' },
     });
-    expect(config.ai.model).toBe('claude-sonnet-4-5');
+    expect(config.ai.model).toBe('claude-sonnet-4-6');
   });
 });
