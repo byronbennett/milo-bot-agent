@@ -16,6 +16,7 @@ import { join, basename } from 'path';
 export interface SkillEntry {
   name: string;
   path: string;
+  baseDir: string;
   description: string;
 }
 
@@ -68,16 +69,20 @@ export function discoverSkills(skillsDir: string): SkillEntry[] {
       skills.push({
         name,
         path: fullPath,
+        baseDir: skillsDir,
         description: extractDescription(content),
       });
     } else if (stat.isDirectory()) {
-      // Folder-based skill — look for a base .md file matching the folder name
+      // Folder-based skill — check for base .md file matching folder name, or SKILL.md
       const baseMd = join(fullPath, `${entry}.md`);
-      if (existsSync(baseMd)) {
-        const content = readFileSync(baseMd, 'utf-8');
+      const skillMd = join(fullPath, 'SKILL.md');
+      const mdPath = existsSync(baseMd) ? baseMd : existsSync(skillMd) ? skillMd : null;
+      if (mdPath) {
+        const content = readFileSync(mdPath, 'utf-8');
         skills.push({
           name: entry,
-          path: baseMd,
+          path: mdPath,
+          baseDir: fullPath,
           description: extractDescription(content),
         });
       }
@@ -96,7 +101,7 @@ export function buildSkillsPromptSection(skillsDir: string): string {
   if (skills.length === 0) return '';
 
   const skillsList = JSON.stringify(
-    skills.map((s) => ({ name: s.name, path: s.path, description: s.description })),
+    skills.map((s) => ({ name: s.name, path: s.path, baseDir: s.baseDir, description: s.description })),
     null,
     2,
   );
@@ -105,6 +110,7 @@ export function buildSkillsPromptSection(skillsDir: string): string {
 
 The following skills are available in the workspace skills directory (\`${skillsDir}\`).
 Each skill has a \`.md\` definition file you can read for detailed instructions on what it does and how to use it.
+When a skill's \`.md\` file contains \`{baseDir}\`, replace it with that skill's \`baseDir\` path shown below.
 
 \`\`\`json
 ${skillsList}
