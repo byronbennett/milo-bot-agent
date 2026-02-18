@@ -28,6 +28,7 @@ export interface PubNubControlMessage {
   agentId: string;
   sessionId: string;
   sessionName?: string;
+  force?: boolean;
   timestamp: string;
 }
 
