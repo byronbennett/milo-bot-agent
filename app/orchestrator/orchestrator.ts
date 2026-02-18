@@ -298,6 +298,9 @@ export class Orchestrator {
       await this.handleDeleteSession(message.sessionId, message.sessionName);
     } else if (message.ui_action === 'UPDATE_MILO_AGENT') {
       await this.handleSelfUpdate(message.force);
+    } else if (message.ui_action === 'check_milo_agent_updates') {
+      this.logger.info('Manual update check requested');
+      await this.checkForUpdates();
     } else if (message.type === 'ui_action') {
       await this.handleUiAction(message as unknown as PubNubSkillCommand);
     } else {
