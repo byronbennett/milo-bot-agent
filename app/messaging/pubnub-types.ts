@@ -50,6 +50,7 @@ export type PubNubEventType =
   | 'task_cancel_requested'
   | 'task_cancelled'
   | 'ui_action_result'
+  | 'tool_use'
   | 'error';
 
 export interface PubNubEventMessage {
@@ -81,6 +82,8 @@ export interface PubNubEventMessage {
       models: Array<{ id: string; name: string }>;
     }>;
   };
+  /** Tool name for tool_use events */
+  toolName?: string;
   /** Skill action result fields */
   action?: string;
   requestId?: string;

@@ -598,7 +598,17 @@ export class Orchestrator {
         break;
 
       case 'WORKER_TOOL_START':
-        this.publishEvent(sessionId, `Using tool: ${event.toolName}...`);
+        if (this.pubnubAdapter?.isConnected) {
+          this.pubnubAdapter.publishEvent({
+            type: 'tool_use',
+            agentId: this.agentId,
+            sessionId,
+            toolName: event.toolName,
+            timestamp: new Date().toISOString(),
+          }).catch((err) => {
+            this.logger.warn('PubNub tool_use publish failed:', err);
+          });
+        }
         break;
 
       case 'WORKER_TOOL_END':
