@@ -51,9 +51,7 @@ describe('Persona Resolver', () => {
       globalThis.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          personaId,
-          personaVersionId: versionId,
-          systemPrompt: prompt,
+          persona: { id: personaId, versionId, systemPrompt: prompt },
         }),
       }) as any;
 
@@ -123,9 +121,7 @@ describe('Persona Resolver', () => {
       globalThis.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          personaId,
-          personaVersionId: versionId,
-          systemPrompt: prompt,
+          persona: { id: personaId, versionId, systemPrompt: prompt },
         }),
       }) as any;
 
