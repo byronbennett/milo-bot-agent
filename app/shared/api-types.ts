@@ -213,6 +213,20 @@ export interface SkillInstalledRequest {
 }
 
 // ============================================================================
+// Update Status API
+// ============================================================================
+
+export interface UpdateStatusRequest {
+  version: string;
+  latestVersion: string;
+  needsUpdate: boolean;
+}
+
+export interface UpdateStatusResponse {
+  ok: boolean;
+}
+
+// ============================================================================
 // Error Responses
 // ============================================================================
 
