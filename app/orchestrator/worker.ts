@@ -16,8 +16,10 @@ import type {
   WorkerCancelMessage,
   WorkerSteerMessage,
   WorkerAnswerMessage,
+  WorkerFormResponseMessage,
   WorkerToOrchestrator,
 } from './ipc-types.js';
+import type { FormDefinition, FormResponse } from '../shared/form-types.js';
 import { sendNotification } from '../utils/notify.js';
 
 const ORPHAN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -40,6 +42,9 @@ let agent: import('@mariozechner/pi-agent-core').Agent | null = null;
 
 // Pending answers for tool safety questions
 const pendingAnswers = new Map<string, (answer: string) => void>();
+
+// Pending form requests (formId -> resolver)
+const pendingForms = new Map<string, { resolve: (response: FormResponse) => void; timeout: ReturnType<typeof setTimeout> | null }>();
 
 // Per-message persona/model tracking
 let currentPersonaId: string | undefined;
@@ -186,6 +191,25 @@ When asked to research something (find YouTube channels, compare options, gather
           toolCallId,
           question,
           options,
+        });
+      });
+    },
+    requestForm: (definition: FormDefinition) => {
+      return new Promise<FormResponse>((resolve) => {
+        const timeout = definition.critical
+          ? null
+          : setTimeout(() => {
+              pendingForms.delete(definition.formId);
+              resolve({ formId: definition.formId, status: 'timed_out' });
+            }, 15 * 60 * 1000);
+
+        pendingForms.set(definition.formId, { resolve, timeout });
+
+        send({
+          type: 'WORKER_FORM_REQUEST',
+          sessionId,
+          taskId: currentTaskId ?? '',
+          formDefinition: definition,
         });
       });
     },
@@ -542,6 +566,15 @@ async function main(): Promise<void> {
       case 'WORKER_ANSWER':
         handleAnswer(msg);
         break;
+      case 'WORKER_FORM_RESPONSE': {
+        const pending = pendingForms.get(msg.formId);
+        if (pending) {
+          if (pending.timeout) clearTimeout(pending.timeout);
+          pendingForms.delete(msg.formId);
+          pending.resolve(msg.response);
+        }
+        break;
+      }
       case 'WORKER_CLOSE':
         log('Close requested, exiting...');
         process.exit(0);
