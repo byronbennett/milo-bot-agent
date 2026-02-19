@@ -1,4 +1,4 @@
-import { createUsageTool, getDateRange, fetchAnthropicUsage, fetchOpenAIUsage } from '../../app/agent-tools/usage-tool.js';
+import { createUsageTool, getDateRange, fetchAnthropicUsage, fetchOpenAIUsage, fetchXaiUsage } from '../../app/agent-tools/usage-tool.js';
 
 describe('createUsageTool', () => {
   it('returns a tool with correct name and label', () => {
@@ -256,4 +256,43 @@ describe('fetchOpenAIUsage', () => {
   });
 });
 
+describe('fetchXaiUsage', () => {
+  it('returns balance info when team_id and key are available', async () => {
+    const mockBalanceResponse = {
+      ok: true,
+      json: async () => ({
+        balance: 4250,
+        currency: 'usd',
+      }),
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => mockBalanceResponse) as any;
+
+    try {
+      const report = await fetchXaiUsage('mgmt-key-test', 'team-123');
+      expect(report).toContain('xAI');
+      expect(report).toContain('$42.50');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns auth error message on 401', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 401,
+      text: async () => 'Unauthorized',
+    })) as any;
+
+    try {
+      const report = await fetchXaiUsage('bad-key', 'team-123');
+      expect(report).toContain('auth failed');
+      expect(report).toContain('console.x.ai');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
 

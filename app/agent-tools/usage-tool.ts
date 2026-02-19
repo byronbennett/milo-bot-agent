@@ -296,6 +296,46 @@ export async function fetchOpenAIUsage(
 }
 
 // ---------------------------------------------------------------------------
+// xAI balance check
+// ---------------------------------------------------------------------------
+
+export async function fetchXaiUsage(
+  managementKey: string,
+  teamId: string,
+): Promise<string> {
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${managementKey}`,
+    'Content-Type': 'application/json',
+  };
+
+  const balanceRes = await fetch(
+    `https://management-api.x.ai/v1/billing/teams/${teamId}/prepaid/balance`,
+    { headers },
+  );
+
+  if (!balanceRes.ok) {
+    const body = await balanceRes.text();
+    if (balanceRes.status === 401 || balanceRes.status === 403) {
+      return `xAI auth failed (${balanceRes.status}). Your management key may be invalid or expired.\nGet a new one at: https://console.x.ai → Settings → Management Keys`;
+    }
+    return `xAI API error ${balanceRes.status}: ${body}`;
+  }
+
+  const balanceData = await balanceRes.json();
+  const balance = balanceData.balance ?? 0;
+  const currency = (balanceData.currency ?? 'usd').toUpperCase();
+
+  const lines: string[] = [];
+  lines.push('xAI Account Summary');
+  lines.push('');
+  lines.push(`Prepaid balance: $${(balance / 100).toFixed(2)} ${currency}`);
+  lines.push('');
+  lines.push('Note: Detailed usage breakdown is available at https://console.x.ai');
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Tool factory
 // ---------------------------------------------------------------------------
 
