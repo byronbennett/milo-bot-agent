@@ -1300,7 +1300,7 @@ export class Orchestrator {
         'read_file', 'write_file', 'bash', 'list_files', 'grep',
         'git_status', 'git_diff', 'git_commit', 'git_log',
       ]);
-      const agentNames = new Set(['claude_code_cli', 'gemini_cli', 'codex_cli']);
+      const agentNames = new Set(['claude_code', 'gemini_cli', 'codex_cli']);
 
       const core = tools.filter((t) => coreNames.has(t.name));
       const agents = tools.filter((t) => agentNames.has(t.name));
@@ -1313,7 +1313,7 @@ export class Orchestrator {
         lines.push('**Agents:**');
         for (const t of agents) {
           let desc = `\`${t.name}\` — ${t.label}`;
-          if (t.name === 'claude_code_cli') {
+          if (t.name === 'claude_code') {
             desc += '. Uses your Anthropic API key (configured during `milo init`). Tokens consumed by Claude Code are billed to your API account at the rate of the model you select.';
           }
           lines.push(`- ${desc}`);

@@ -38,7 +38,7 @@ export function createSetProjectTool(ctx: ToolContext, callbacks: {
     name: 'set_project',
     label: 'Set Project',
     description:
-      'Confirm or create a project for this session. Must be called before using any coding tool (claude_code, gemini_cli, codex_cli). ' +
+      'Confirm or create a project for this session. Must be called before using any coding tool (claude_code, gemini_cli, codex_cli) to set the working directory. ' +
       'Use isNew=false to select an existing project, or isNew=true to create a new one.',
     parameters: SetProjectParams,
     execute: async (_toolCallId, params) => {

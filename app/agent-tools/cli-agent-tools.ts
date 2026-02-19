@@ -91,10 +91,11 @@ function buildCanUseTool(ctx: ToolContext) {
 
 export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
   const claudeCodeTool: AgentTool<typeof ClaudeCodeParams> = {
-    name: 'claude_code_cli',
-    label: 'Claude Code',
+    name: 'claude_code',
+    label: 'Claude Code (AI Coding Agent)',
     description:
-      'Delegate a complex coding task to Claude Code CLI. Best for multi-file refactors, large features, or tasks that benefit from Claude Code\'s specialized coding capabilities. ' +
+      'Delegate a coding task to Claude Code, Anthropic\'s AI coding agent. Claude Code can read/write files, run commands, search codebases, and execute multi-step coding workflows autonomously. ' +
+      'Use this for any coding work: writing features, fixing bugs, refactoring, running tests, git operations, and more. ' +
       'Supports multi-turn conversations: the first call returns a session_id, pass it back on subsequent calls to continue the conversation.',
     parameters: ClaudeCodeParams,
     execute: async (_toolCallId, params, signal, onUpdate) => {

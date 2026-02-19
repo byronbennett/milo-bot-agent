@@ -9,7 +9,7 @@ describe('loadTools', () => {
     expect(names).toContain('read_file');
     expect(names).toContain('bash');
     expect(names).toContain('web_fetch');
-    expect(names).toContain('claude_code_cli');
+    expect(names).toContain('claude_code');
     expect(names).toContain('notify_user');
   });
 
@@ -26,7 +26,7 @@ describe('loadTools', () => {
     expect(names).toContain('bash');
     expect(names).toContain('web_fetch');
     expect(names).toContain('notify_user');
-    expect(names).not.toContain('claude_code_cli');
+    expect(names).not.toContain('claude_code');
   });
 
   it('custom array filters by name', () => {

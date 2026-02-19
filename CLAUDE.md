@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MiloBot Agent is a TypeScript CLI that acts as a remote control for AI coding agents. It runs as a daemon, receiving user messages via PubNub (real-time) or REST polling, and delegates work to worker processes that use pi-agent-core for multi-provider LLM interactions. The package is published as `milo-bot-agent` with a `milo` CLI binary.
+MiloBot Agent is a TypeScript CLI that acts as a remote control for AI agents capable of coding, writing, research, and general-purpose tasks. It runs as a daemon, receiving user messages via PubNub (real-time) or REST polling, and delegates work to worker processes that use pi-agent-core for multi-provider LLM interactions. The package is published as `milo-bot-agent` with a `milo` CLI binary.
 
 ## Commands
 
@@ -113,7 +113,7 @@ System-level keys (MILO_API_KEY, ANTHROPIC_API_KEY, etc.) use their own dedicate
 
 Jest with `ts-jest/presets/default-esm`. Tests live in `__tests__/` mirroring `app/` structure. The `--experimental-vm-modules` flag is required for ESM support (already configured in `pnpm test`).
 
-## Environment Variables
+## Environment Variables (Stored securely in OS keychain)
 
 - `MILO_API_KEY` — Required. Agent authentication key.
 - `ANTHROPIC_API_KEY` — Optional. Enables AI-powered intent parsing, prompt enhancement, and auto-answer.

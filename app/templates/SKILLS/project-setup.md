@@ -6,7 +6,7 @@ description: Guides project selection and creation before using coding tools. Fo
 
 ## When to Use
 
-Before calling any coding tool (`claude_code`, `claude_code_cli`, `gemini_cli`, `codex_cli`), if no project has been set for this session, you MUST follow this skill to confirm a project with the user.
+Before calling any coding tool (`claude_code`, `gemini_cli`, `codex_cli`), if no project has been set for this session, you MUST follow this skill to confirm a project with the user.
 
 ## How to Detect
 

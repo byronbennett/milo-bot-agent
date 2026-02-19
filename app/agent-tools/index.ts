@@ -54,7 +54,7 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
   // invoked by an orchestrating agent. Always use the API-key-based SDK tools.
   // const cliTools = ctx.preferAPIKeyClaude
   //   ? createCliAgentTools(ctx)
-  //   : [createClaudeCodeOAuthTool(ctx), ...createCliAgentTools(ctx).filter((t) => t.name !== 'claude_code_cli')];
+  //   : [createClaudeCodeOAuthTool(ctx), ...createCliAgentTools(ctx).filter((t) => t.name !== 'claude_code')];
   const cliTools = createCliAgentTools(ctx);
   const uiTools = [createNotifyTool(ctx.sendNotification)];
   const setProjectTool = createSetProjectTool(ctx, {
