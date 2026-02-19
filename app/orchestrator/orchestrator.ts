@@ -1315,6 +1315,8 @@ export class Orchestrator {
           let desc = `\`${t.name}\` — ${t.label}`;
           if (t.name === 'claude_code') {
             desc += '. Uses your Anthropic API key (configured during `milo init`). Tokens consumed by Claude Code are billed to your API account at the rate of the model you select.';
+          } else if (t.name === 'codex_cli') {
+            desc += '. Requires OPENAI_API_KEY (configured during `milo init`) or `codex login`. Tokens are billed to your OpenAI account.';
           }
           lines.push(`- ${desc}`);
         }
