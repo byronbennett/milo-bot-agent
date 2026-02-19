@@ -12,6 +12,8 @@ import { createBrowserTool } from './browser-tool.js';
 import { createWebFetchTool } from './web-fetch-tool.js';
 import { createSetProjectTool } from './project-tool.js';
 import { createFormTool, type FormToolContext } from './form-tool.js';
+import { createUsageTool } from './usage-tool.js';
+import { loadToolKey } from '../utils/keychain.js';
 
 export { isDangerousCommand } from './bash-tool.js';
 
@@ -63,19 +65,22 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
     },
   });
   const formTools = ctx.requestForm ? [createFormTool({ requestForm: ctx.requestForm })] : [];
+  const usageTools = ctx.requestForm
+    ? [createUsageTool({ loadAdminKey: (name) => loadToolKey('usage', name), requestForm: ctx.requestForm })]
+    : [];
 
   switch (toolSet) {
     case 'full':
-      return [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, uiTools[0], createBrowserTool(), ...formTools];
+      return [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, uiTools[0], createBrowserTool(), ...formTools, ...usageTools];
     case 'chat':
       return [...uiTools];
     case 'minimal':
-      return [...coreTools, createWebFetchTool(), setProjectTool, ...uiTools, ...formTools];
+      return [...coreTools, createWebFetchTool(), setProjectTool, ...uiTools, ...formTools, ...usageTools];
     default:
       if (Array.isArray(toolSet)) {
-        const all = [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, ...uiTools, createBrowserTool(), ...formTools];
+        const all = [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, ...uiTools, createBrowserTool(), ...formTools, ...usageTools];
         return all.filter((t) => toolSet.includes(t.name));
       }
-      return [...coreTools, createWebFetchTool(), ...uiTools, ...formTools];
+      return [...coreTools, createWebFetchTool(), ...uiTools, ...formTools, ...usageTools];
   }
 }

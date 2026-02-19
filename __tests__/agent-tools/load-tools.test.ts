@@ -36,6 +36,26 @@ describe('loadTools', () => {
     expect(tools.map((t) => t.name).sort()).toEqual(['bash', 'read_file']);
   });
 
+  it('full set includes check_usage when requestForm is provided', () => {
+    const ctxWithForm = {
+      ...ctx,
+      requestForm: async () => ({ formId: 'test', status: 'cancelled' as const }),
+    };
+    const tools = loadTools('full', ctxWithForm);
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('check_usage');
+  });
+
+  it('minimal set includes check_usage when requestForm is provided', () => {
+    const ctxWithForm = {
+      ...ctx,
+      requestForm: async () => ({ formId: 'test', status: 'cancelled' as const }),
+    };
+    const tools = loadTools('minimal', ctxWithForm);
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('check_usage');
+  });
+
   it('codex_cli tool has correct parameter schema', () => {
     const tools = loadTools('full', ctx);
     const codexTool = tools.find((t) => t.name === 'codex_cli');
