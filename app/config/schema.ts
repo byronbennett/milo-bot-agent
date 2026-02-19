@@ -80,6 +80,18 @@ export const updateConfigSchema = z.object({
   restartCommand: z.string().optional(),
 });
 
+export const localModelsConfigSchema = z.object({
+  ollama: z.object({
+    enabled: z.boolean().default(true),
+    port: z.number().default(11434),
+  }).default({}),
+  lmStudio: z.object({
+    enabled: z.boolean().default(true),
+    port: z.number().default(1234),
+  }).default({}),
+  timeoutMs: z.number().default(2000),
+});
+
 export const agentConfigSchema = z.object({
   agentName: z.string().min(1).max(100),
   agentId: z.string().optional(),
@@ -96,6 +108,7 @@ export const agentConfigSchema = z.object({
   messaging: messagingConfigSchema.default({}),
   pubnub: pubnubConfigSchema.default({}),
   update: updateConfigSchema.default({}),
+  localModels: localModelsConfigSchema.default({}),
   streaming: z.boolean().default(false),
   onboardingComplete: z.boolean().default(false),
 });
@@ -109,3 +122,4 @@ export type ToolsConfig = z.infer<typeof toolsConfigSchema>;
 export type AIConfig = z.infer<typeof aiConfigSchema>;
 export type MessagingConfig = z.infer<typeof messagingConfigSchema>;
 export type UpdateConfig = z.infer<typeof updateConfigSchema>;
+export type LocalModelsConfig = z.infer<typeof localModelsConfigSchema>;
