@@ -135,6 +135,9 @@ export class Orchestrator {
       onWorkerEvent: this.handleWorkerEvent.bind(this),
       onWorkerStateChange: (sessionId: string, pid: number | null, state: WorkerState) => {
         updateWorkerState(this.db, sessionId, pid, state);
+        if (state === 'dead') {
+          this.cleanupPendingForms(sessionId);
+        }
       },
     });
 
@@ -530,6 +533,9 @@ export class Orchestrator {
   private async handleDeleteSession(sessionId: string, sessionName?: string): Promise<void> {
     this.logger.info(`Deleting session ${sessionId} (name=${sessionName})`);
 
+    // 0. Clean up any pending forms for this session
+    this.cleanupPendingForms(sessionId);
+
     // 1. Close session actor (cancel tasks, stop worker process)
     await this.actorManager.closeSession(sessionId);
 
@@ -781,6 +787,7 @@ export class Orchestrator {
         if (event.fatal) {
           insertSessionMessage(this.db, sessionId, 'system', `Worker error (fatal): ${event.error}`);
           updateSessionStatus(this.db, sessionId, 'ERRORED');
+          this.cleanupPendingForms(sessionId);
         }
         break;
       }
@@ -1165,6 +1172,19 @@ export class Orchestrator {
   }
 
   // --- Helpers ---
+
+  /**
+   * Remove all pendingForms entries for a given session.
+   * Called when a session is deleted or its worker dies.
+   */
+  private cleanupPendingForms(sessionId: string): void {
+    for (const [formId, entry] of this.pendingForms) {
+      if (entry.sessionId === sessionId) {
+        this.pendingForms.delete(formId);
+        this.logger.verbose(`Cleaned up pending form ${formId} for session ${sessionId}`);
+      }
+    }
+  }
 
   private isDefaultServerUrl(apiUrl: string): boolean {
     return /^https?:\/\/(www\.)?milobot\.dev(\/|$)/.test(apiUrl);
