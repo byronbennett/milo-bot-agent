@@ -1310,6 +1310,7 @@ export class Orchestrator {
         lines.push(`**Core:** ${core.map((t) => `\`${t.name}\``).join(' · ')}`);
       }
       if (agents.length > 0) {
+        lines.push('');
         lines.push('**Agents:**');
         for (const t of agents) {
           let desc = `\`${t.name}\` — ${t.label}`;
@@ -1322,6 +1323,7 @@ export class Orchestrator {
         }
       }
       if (utility.length > 0) {
+        lines.push('');
         lines.push(`**Utility:** ${utility.map((t) => `\`${t.name}\``).join(' · ')}`);
       }
     }
