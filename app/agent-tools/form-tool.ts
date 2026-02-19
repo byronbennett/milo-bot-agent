@@ -13,7 +13,8 @@ export function createFormTool(ctx: FormToolContext): AgentTool<any> {
     description:
       'Send a structured form to the user and wait for their response. ' +
       'Use this when you need specific, structured information rather than free-text conversation. ' +
-      'Supported field types: text, textarea, number, checkbox, select, radio.',
+      'Supported field types: text, textarea, number, checkbox, select, radio. ' +
+      'For checkbox fields, required=true means the box must be checked (e.g. terms acceptance).',
     parameters: Type.Object({
       title: Type.String({ description: 'Form title shown to user' }),
       description: Type.Optional(Type.String({ description: 'Explanation of why this input is needed' })),
