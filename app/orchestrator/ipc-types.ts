@@ -64,13 +64,22 @@ export interface WorkerAnswerMessage {
   answer: string;
 }
 
+export interface WorkerFormResponseMessage {
+  type: 'WORKER_FORM_RESPONSE';
+  sessionId: string;
+  taskId: string;
+  formId: string;
+  response: import('../shared/form-types.js').FormResponseSubmitted | import('../shared/form-types.js').FormResponseCancelled;
+}
+
 export type OrchestratorToWorker =
   | WorkerInitMessage
   | WorkerTaskMessage
   | WorkerCancelMessage
   | WorkerCloseMessage
   | WorkerSteerMessage
-  | WorkerAnswerMessage;
+  | WorkerAnswerMessage
+  | WorkerFormResponseMessage;
 
 // --- Worker → Orchestrator ---
 
@@ -151,6 +160,13 @@ export interface WorkerQuestionMessage {
   options?: string[];
 }
 
+export interface WorkerFormRequestMessage {
+  type: 'WORKER_FORM_REQUEST';
+  sessionId: string;
+  taskId: string;
+  formDefinition: import('../shared/form-types.js').FormDefinition;
+}
+
 export interface WorkerProjectSetMessage {
   type: 'WORKER_PROJECT_SET';
   sessionId: string;
@@ -170,6 +186,7 @@ export type WorkerToOrchestrator =
   | WorkerToolStartMessage
   | WorkerToolEndMessage
   | WorkerQuestionMessage
+  | WorkerFormRequestMessage
   | WorkerProjectSetMessage;
 
 // Union of all IPC messages
