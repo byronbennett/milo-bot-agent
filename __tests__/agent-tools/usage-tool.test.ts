@@ -1,4 +1,4 @@
-import { createUsageTool, getDateRange, fetchAnthropicUsage } from '../../app/agent-tools/usage-tool.js';
+import { createUsageTool, getDateRange, fetchAnthropicUsage, fetchOpenAIUsage } from '../../app/agent-tools/usage-tool.js';
 
 describe('createUsageTool', () => {
   it('returns a tool with correct name and label', () => {
@@ -170,4 +170,90 @@ describe('fetchAnthropicUsage', () => {
     }
   });
 });
+
+describe('fetchOpenAIUsage', () => {
+  it('calls correct URL with admin key and returns formatted report', async () => {
+    const mockUsageResponse = {
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            start_time: 1739836800,
+            end_time: 1739923200,
+            results: [
+              {
+                object: 'organization.usage.completions.result',
+                input_tokens: 200000,
+                output_tokens: 80000,
+                num_model_requests: 500,
+                model: 'gpt-4o-2025-01-01',
+              },
+            ],
+          },
+        ],
+      }),
+    };
+    const mockCostResponse = {
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            start_time: 1739836800,
+            end_time: 1739923200,
+            results: [
+              {
+                object: 'organization.costs.result',
+                amount: { value: 250, currency: 'usd' },
+                line_item: 'Completions',
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      if (typeof url === 'string' && url.includes('/usage/')) return mockUsageResponse;
+      if (typeof url === 'string' && url.includes('/costs')) return mockCostResponse;
+      return mockUsageResponse;
+    }) as any;
+
+    try {
+      const report = await fetchOpenAIUsage(
+        'sk-admin-test',
+        new Date('2026-02-12T00:00:00Z'),
+        new Date('2026-02-19T00:00:00Z'),
+      );
+      expect(report).toContain('OpenAI');
+      expect(report).toContain('gpt-4o');
+      expect(report).toContain('200,000');
+      expect(report).toContain('80,000');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns auth error message on 403', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 403,
+      text: async () => 'Forbidden',
+    })) as any;
+
+    try {
+      const report = await fetchOpenAIUsage(
+        'bad-key',
+        new Date('2026-02-12T00:00:00Z'),
+        new Date('2026-02-19T00:00:00Z'),
+      );
+      expect(report).toContain('auth failed');
+      expect(report).toContain('platform.openai.com');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 

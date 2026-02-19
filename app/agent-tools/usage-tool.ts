@@ -213,6 +213,89 @@ export async function fetchAnthropicUsage(
 }
 
 // ---------------------------------------------------------------------------
+// OpenAI usage + cost fetch
+// ---------------------------------------------------------------------------
+
+export async function fetchOpenAIUsage(
+  adminKey: string,
+  start: Date,
+  end: Date,
+): Promise<string> {
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${adminKey}`,
+    'Content-Type': 'application/json',
+  };
+
+  const startTime = Math.floor(start.getTime() / 1000);
+  const endTime = Math.floor(end.getTime() / 1000);
+
+  // Fetch completions usage grouped by model
+  const usageParams = new URLSearchParams({
+    start_time: String(startTime),
+    end_time: String(endTime),
+    bucket_width: '1d',
+  });
+  usageParams.append('group_by[]', 'model');
+
+  const usageRes = await fetch(
+    `https://api.openai.com/v1/organization/usage/completions?${usageParams}`,
+    { headers },
+  );
+
+  if (!usageRes.ok) {
+    const body = await usageRes.text();
+    if (usageRes.status === 401 || usageRes.status === 403) {
+      return `OpenAI auth failed (${usageRes.status}). Your admin key may be invalid or expired.\nGet a new one at: https://platform.openai.com/settings/organization/admin-keys`;
+    }
+    return `OpenAI API error ${usageRes.status}: ${body}`;
+  }
+
+  const usageData = await usageRes.json();
+
+  // Aggregate by model
+  const modelUsage = new Map<string, { input: number; output: number }>();
+  for (const bucket of usageData.data ?? []) {
+    for (const result of bucket.results ?? []) {
+      const model = result.model ?? 'unknown';
+      const existing = modelUsage.get(model) ?? { input: 0, output: 0 };
+      existing.input += result.input_tokens ?? 0;
+      existing.output += result.output_tokens ?? 0;
+      modelUsage.set(model, existing);
+    }
+  }
+
+  // Fetch costs
+  const costParams = new URLSearchParams({
+    start_time: String(startTime),
+    bucket_width: '1d',
+  });
+
+  let totalCostCents = 0;
+  const modelCosts = new Map<string, number>();
+
+  try {
+    const costRes = await fetch(
+      `https://api.openai.com/v1/organization/costs?${costParams}`,
+      { headers },
+    );
+
+    if (costRes.ok) {
+      const costData = await costRes.json();
+      for (const bucket of costData.data ?? []) {
+        for (const result of bucket.results ?? []) {
+          const amountCents = Math.round((result.amount?.value ?? 0) * 100);
+          totalCostCents += amountCents;
+        }
+      }
+    }
+  } catch {
+    // Cost fetch is best-effort
+  }
+
+  return formatReport('OpenAI', start, end, modelUsage, modelCosts, totalCostCents);
+}
+
+// ---------------------------------------------------------------------------
 // Tool factory
 // ---------------------------------------------------------------------------
 
