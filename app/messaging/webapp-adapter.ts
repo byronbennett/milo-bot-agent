@@ -118,6 +118,16 @@ export class WebAppAdapter implements MessagingAdapter {
   }
 
   /**
+   * Fetch the curated model list from the web app.
+   */
+  async getCuratedModels(): Promise<Array<{ provider: string; modelId: string; displayName: string }>> {
+    const response = await this.request<{
+      models: Array<{ provider: string; modelId: string; displayName: string }>;
+    }>('GET', '/agent/curated-models');
+    return response.models;
+  }
+
+  /**
    * Report agent version and update status to web app
    */
   async sendUpdateStatus(status: UpdateStatusRequest): Promise<void> {
