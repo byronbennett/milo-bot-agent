@@ -48,10 +48,11 @@ export class WebAppAdapter implements MessagingAdapter {
   /**
    * Send a message to the user
    */
-  async sendMessage(content: string, sessionId: string): Promise<void> {
+  async sendMessage(content: string, sessionId: string, formData?: Record<string, unknown>): Promise<void> {
     await this.request('POST', '/messages/send', {
       sessionId,
       content,
+      ...(formData ? { formData } : {}),
     });
   }
 

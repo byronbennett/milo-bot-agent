@@ -878,7 +878,7 @@ export class Orchestrator {
         // Persist form as a message via outbox (for page refresh survival)
         const formContent = JSON.stringify(formDefinition);
         insertSessionMessage(this.db, sessionId, 'agent', formContent);
-        enqueueOutbox(this.db, 'send_message', { sessionId, content: formContent }, sessionId);
+        enqueueOutbox(this.db, 'send_message', { sessionId, content: formContent, formData: formDefinition }, sessionId);
         break;
       }
     }
@@ -1016,7 +1016,7 @@ export class Orchestrator {
             await this.restAdapter.acknowledgeMessages(payload.messageIds);
             break;
           case 'send_message':
-            await this.restAdapter.sendMessage(payload.content, payload.sessionId);
+            await this.restAdapter.sendMessage(payload.content, payload.sessionId, payload.formData);
             break;
           default:
             this.logger.warn(`Unknown outbox event type: ${item.event_type}`);

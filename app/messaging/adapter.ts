@@ -8,7 +8,7 @@ export interface MessagingAdapter {
   /**
    * Send a message to the user
    */
-  sendMessage(content: string, sessionId: string): Promise<void>;
+  sendMessage(content: string, sessionId: string, formData?: Record<string, unknown>): Promise<void>;
 
   /**
    * Get pending messages from the user
