@@ -7,6 +7,7 @@ export type SessionStatus =
   | 'OPEN_IDLE'
   | 'OPEN_RUNNING'
   | 'OPEN_WAITING_USER'
+  | 'OPEN_INPUT_REQUIRED'
   | 'OPEN_PAUSED'
   | 'CLOSED'
   | 'ERRORED';
