@@ -41,6 +41,8 @@ import { getProviders, getModels, getEnvApiKey, registerBuiltInApiProviders } fr
 import type Database from 'better-sqlite3';
 import { loadTools, type ToolContext } from '../agent-tools/index.js';
 import { discoverSkills } from '../skills/skills-registry.js';
+import { getCuratedAllowList, invalidateCuratedCache } from '../models/curated-models.js';
+import { detectLocalModels } from '../models/local-models.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -640,7 +642,8 @@ export class Orchestrator {
 
     // LIST_MODELS doesn't need a session/worker — handle inline
     if (workItemType === 'LIST_MODELS') {
-      const { text, structured } = this.getAvailableModels();
+      invalidateCuratedCache(); // Force fresh fetch on explicit /models
+      const { text, structured } = await this.getAvailableModels(true);
       this.publishModelsList(message.sessionId, structured, text);
       enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: text }, message.sessionId);
       this.syncModelsToServer();
@@ -649,7 +652,7 @@ export class Orchestrator {
 
     // STATUS_REQUEST doesn't need a worker — handle inline
     if (workItemType === 'STATUS_REQUEST') {
-      const statusText = this.buildStatusReport(message.sessionId);
+      const statusText = await this.buildStatusReport(message.sessionId);
       this.publishEvent(message.sessionId, statusText);
       enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: statusText }, message.sessionId);
       return;
@@ -895,16 +898,24 @@ export class Orchestrator {
 
   /**
    * Get available models as both formatted text and structured data.
+   * Fetches the curated allow-list from the server, filters pi-ai models,
+   * and detects local Ollama/LM Studio models.
    */
-  private getAvailableModels(): {
+  private async getAvailableModels(forceRefresh = false): Promise<{
     text: string;
     structured: {
       defaultModel?: string;
       providers: Array<{ provider: string; models: Array<{ id: string; name: string }> }>;
+      localModels?: Array<{ provider: string; models: string[] }>;
     };
-  } {
+  }> {
     registerBuiltInApiProviders();
     const allProviders = getProviders();
+
+    // Fetch curated allow-list (cached unless forceRefresh)
+    const allowList = await getCuratedAllowList(this.restAdapter, forceRefresh);
+    const hasAllowList = allowList.size > 0;
+
     const lines: string[] = ['Available Models:'];
 
     const defaultModel = this.config.ai.agent.model || this.config.ai.utility.model;
@@ -912,19 +923,30 @@ export class Orchestrator {
       lines.push(`\nDefault model: ${defaultModel}`);
     }
 
+    lines.push('\nCloud Models:');
+
     const structuredProviders: Array<{ provider: string; models: Array<{ id: string; name: string }> }> = [];
 
     for (const provider of allProviders) {
       const envKey = getEnvApiKey(provider);
       if (!envKey) continue;
 
+      // If allow-list is available, skip providers not in it
+      if (hasAllowList && !allowList.has(provider)) continue;
+
       try {
         const models = getModels(provider);
         if (models.length === 0) continue;
 
+        // Filter models against allow-list if available
+        const filtered = hasAllowList
+          ? models.filter((m) => allowList.get(provider)!.has(m.id))
+          : models;
+        if (filtered.length === 0) continue;
+
         lines.push(`\n${provider}:`);
         const providerModels: Array<{ id: string; name: string }> = [];
-        for (const model of models) {
+        for (const model of filtered) {
           lines.push(`  - ${model.name} (${model.id})`);
           providerModels.push({ id: model.id, name: model.name });
         }
@@ -938,11 +960,37 @@ export class Orchestrator {
       lines.push('\nNo API keys configured. Run `milo init` to add provider keys.');
     }
 
+    // Detect local models (Ollama, LM Studio)
+    const localModels = await detectLocalModels(this.config);
+    let structuredLocal: Array<{ provider: string; models: string[] }> | undefined;
+
+    if (localModels.length > 0) {
+      // Group by provider
+      const grouped = new Map<string, string[]>();
+      for (const lm of localModels) {
+        if (!grouped.has(lm.provider)) {
+          grouped.set(lm.provider, []);
+        }
+        grouped.get(lm.provider)!.push(lm.name);
+      }
+
+      lines.push('\nLocal Models:');
+      structuredLocal = [];
+      for (const [provider, models] of grouped) {
+        lines.push(`\n${provider}:`);
+        for (const name of models) {
+          lines.push(`  - ${name}`);
+        }
+        structuredLocal.push({ provider, models });
+      }
+    }
+
     return {
       text: lines.join('\n'),
       structured: {
         defaultModel: defaultModel || undefined,
         providers: structuredProviders,
+        localModels: structuredLocal,
       },
     };
   }
@@ -952,15 +1000,18 @@ export class Orchestrator {
    * Fire-and-forget — failures are logged but don't block the caller.
    */
   private syncModelsToServer(): void {
-    const { structured } = this.getAvailableModels();
-    const models = structured.providers.flatMap((p) =>
-      p.models.map((m) => ({ provider: p.provider, modelId: m.id, displayName: m.name }))
-    );
+    this.getAvailableModels().then(({ structured }) => {
+      const models = structured.providers.flatMap((p) =>
+        p.models.map((m) => ({ provider: p.provider, modelId: m.id, displayName: m.name }))
+      );
 
-    this.restAdapter.syncModels(models).then(() => {
-      this.logger.verbose(`Synced ${models.length} models to server`);
+      this.restAdapter.syncModels(models).then(() => {
+        this.logger.verbose(`Synced ${models.length} models to server`);
+      }).catch((err) => {
+        this.logger.warn('Failed to sync models to server:', err);
+      });
     }).catch((err) => {
-      this.logger.warn('Failed to sync models to server:', err);
+      this.logger.warn('Failed to get models for sync:', err);
     });
   }
 
@@ -1252,7 +1303,7 @@ export class Orchestrator {
   /**
    * Build a Markdown-formatted status report.
    */
-  private buildStatusReport(requestingSessionId: string): string {
+  private async buildStatusReport(requestingSessionId: string): Promise<string> {
     const lines: string[] = [];
 
     // --- Header ---
@@ -1276,16 +1327,23 @@ export class Orchestrator {
     }
 
     // --- Models ---
-    const { structured } = this.getAvailableModels();
+    const { structured } = await this.getAvailableModels();
     const modelCount = structured.providers.reduce((sum, p) => sum + p.models.length, 0);
+    const localCount = structured.localModels?.reduce((sum, p) => sum + p.models.length, 0) ?? 0;
     lines.push('');
-    lines.push(`#### Models — ${modelCount} across ${structured.providers.length} provider${structured.providers.length !== 1 ? 's' : ''}`);
+    lines.push(`#### Models — ${modelCount} cloud${localCount > 0 ? `, ${localCount} local` : ''} across ${structured.providers.length} provider${structured.providers.length !== 1 ? 's' : ''}`);
     if (structured.providers.length === 0) {
       lines.push('*No API keys configured.*');
     } else {
       for (const provider of structured.providers) {
         const names = provider.models.map((m) => `\`${m.name}\``).join(' · ');
         lines.push(`**${provider.provider}:** ${names}`);
+      }
+    }
+    if (structured.localModels) {
+      for (const local of structured.localModels) {
+        const names = local.models.map((m) => `\`${m}\``).join(' · ');
+        lines.push(`**${local.provider}:** ${names}`);
       }
     }
 
