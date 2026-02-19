@@ -1,4 +1,4 @@
-import { createUsageTool } from '../../app/agent-tools/usage-tool.js';
+import { createUsageTool, getDateRange } from '../../app/agent-tools/usage-tool.js';
 
 describe('createUsageTool', () => {
   it('returns a tool with correct name and label', () => {
@@ -65,3 +65,32 @@ describe('execute', () => {
     expect(result.content[0].text).toContain('cancelled');
   });
 });
+
+describe('getDateRange', () => {
+  const now = new Date('2026-02-19T15:30:00Z');
+
+  it('today returns start of today to now', () => {
+    const { start, end } = getDateRange('today', now);
+    expect(start.toISOString()).toBe('2026-02-19T00:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-02-19T15:30:00.000Z');
+  });
+
+  it('7d returns 7 days ago to now', () => {
+    const { start, end } = getDateRange('7d', now);
+    expect(start.toISOString()).toBe('2026-02-12T00:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-02-19T15:30:00.000Z');
+  });
+
+  it('30d returns 30 days ago to now', () => {
+    const { start, end } = getDateRange('30d', now);
+    expect(start.toISOString()).toBe('2026-01-20T00:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-02-19T15:30:00.000Z');
+  });
+
+  it('month returns start of current month to now', () => {
+    const { start, end } = getDateRange('month', now);
+    expect(start.toISOString()).toBe('2026-02-01T00:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-02-19T15:30:00.000Z');
+  });
+});
+

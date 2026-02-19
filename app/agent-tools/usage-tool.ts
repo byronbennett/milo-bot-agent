@@ -36,6 +36,34 @@ const NO_KEYS_MESSAGE = `No admin keys configured. To check usage, store admin/m
   Then run: milo config set-key usage xai-management-key <your-key>`;
 
 // ---------------------------------------------------------------------------
+// Date range helper
+// ---------------------------------------------------------------------------
+
+export function getDateRange(period: string, now = new Date()): { start: Date; end: Date } {
+  const end = now;
+  let start: Date;
+
+  switch (period) {
+    case 'today':
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      break;
+    case '7d':
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 7));
+      break;
+    case '30d':
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30));
+      break;
+    case 'month':
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      break;
+    default:
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 7));
+  }
+
+  return { start, end };
+}
+
+// ---------------------------------------------------------------------------
 // Tool factory
 // ---------------------------------------------------------------------------
 
