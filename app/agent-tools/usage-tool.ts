@@ -163,15 +163,15 @@ export async function fetchAnthropicUsage(
     return `Anthropic API error ${usageRes.status}: ${body}`;
   }
 
-  const usageData = await usageRes.json();
+  const usageData = (await usageRes.json()) as { data?: Record<string, unknown>[] };
 
   // Aggregate by model
   const modelUsage = new Map<string, { input: number; output: number }>();
   for (const bucket of usageData.data ?? []) {
-    const model = bucket.model ?? 'unknown';
+    const model = (bucket.model as string) ?? 'unknown';
     const existing = modelUsage.get(model) ?? { input: 0, output: 0 };
-    existing.input += bucket.input_tokens ?? 0;
-    existing.output += bucket.output_tokens ?? 0;
+    existing.input += (bucket.input_tokens as number) ?? 0;
+    existing.output += (bucket.output_tokens as number) ?? 0;
     modelUsage.set(model, existing);
   }
 
@@ -193,11 +193,11 @@ export async function fetchAnthropicUsage(
     );
 
     if (costRes.ok) {
-      const costData = await costRes.json();
+      const costData = (await costRes.json()) as { data?: Record<string, unknown>[] };
       for (const bucket of costData.data ?? []) {
-        const cents = bucket.cost_cents ?? 0;
+        const cents = (bucket.cost_cents as number) ?? 0;
         totalCostCents += cents;
-        const desc = bucket.description ?? '';
+        const desc = (bucket.description as string) ?? '';
         const modelMatch = desc.match(/:\s*(.+)/);
         if (modelMatch) {
           const model = modelMatch[1].trim();
@@ -250,16 +250,16 @@ export async function fetchOpenAIUsage(
     return `OpenAI API error ${usageRes.status}: ${body}`;
   }
 
-  const usageData = await usageRes.json();
+  const usageData = (await usageRes.json()) as { data?: Record<string, unknown>[] };
 
   // Aggregate by model
   const modelUsage = new Map<string, { input: number; output: number }>();
   for (const bucket of usageData.data ?? []) {
-    for (const result of bucket.results ?? []) {
-      const model = result.model ?? 'unknown';
+    for (const result of (bucket.results as Record<string, unknown>[]) ?? []) {
+      const model = (result.model as string) ?? 'unknown';
       const existing = modelUsage.get(model) ?? { input: 0, output: 0 };
-      existing.input += result.input_tokens ?? 0;
-      existing.output += result.output_tokens ?? 0;
+      existing.input += (result.input_tokens as number) ?? 0;
+      existing.output += (result.output_tokens as number) ?? 0;
       modelUsage.set(model, existing);
     }
   }
@@ -280,10 +280,11 @@ export async function fetchOpenAIUsage(
     );
 
     if (costRes.ok) {
-      const costData = await costRes.json();
+      const costData = (await costRes.json()) as { data?: Record<string, unknown>[] };
       for (const bucket of costData.data ?? []) {
-        for (const result of bucket.results ?? []) {
-          const amountCents = Math.round((result.amount?.value ?? 0) * 100);
+        for (const result of (bucket.results as Record<string, unknown>[]) ?? []) {
+          const amount = result.amount as { value?: number } | undefined;
+          const amountCents = Math.round((amount?.value ?? 0) * 100);
           totalCostCents += amountCents;
         }
       }
@@ -321,7 +322,7 @@ export async function fetchXaiUsage(
     return `xAI API error ${balanceRes.status}: ${body}`;
   }
 
-  const balanceData = await balanceRes.json();
+  const balanceData = (await balanceRes.json()) as { balance?: number; currency?: string };
   const balance = balanceData.balance ?? 0;
   const currency = (balanceData.currency ?? 'usd').toUpperCase();
 
