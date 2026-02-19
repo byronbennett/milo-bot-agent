@@ -237,6 +237,21 @@ export class SessionActorManager {
     }
   }
 
+  /**
+   * Send a form response to the worker (user submitted or cancelled a form).
+   */
+  sendFormResponse(sessionId: string, message: import('./ipc-types.js').WorkerFormResponseMessage): void {
+    const actor = this.actors.get(sessionId);
+    if (!actor || !actor.worker || actor.worker.state === 'dead') {
+      this.logger.warn(`Cannot send form response for session ${sessionId}: no live worker`);
+      return;
+    }
+    this.sendToWorker(actor, message);
+    if (actor.status === 'OPEN_INPUT_REQUIRED') {
+      actor.status = message.response.status === 'submitted' ? 'OPEN_RUNNING' : 'OPEN_IDLE';
+    }
+  }
+
   // --- Private helpers ---
 
   private setWorkerState(actor: SessionActor, state: WorkerState): void {

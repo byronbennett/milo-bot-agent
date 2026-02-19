@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
 import { WebAppAdapter, PubNubAdapter } from '../messaging/index.js';
-import type { PubNubControlMessage, PubNubSkillCommand } from '../messaging/pubnub-types.js';
+import type { PubNubControlMessage, PubNubSkillCommand, PubNubFormResponseCommand } from '../messaging/pubnub-types.js';
 import { SkillInstaller } from '../skills/skill-installer.js';
 import type { PendingMessage } from '../shared/index.js';
 import { getDb, closeDb } from '../db/index.js';
@@ -66,6 +66,7 @@ export class Orchestrator {
   private shuttingDown = false;
   private orphanMonitors = new Map<string, NodeJS.Timeout>();
   private orphanedSessionIds = new Set<string>();
+  private pendingForms = new Map<string, { formId: string; sessionId: string; taskId: string }>();
   private skillInstaller!: SkillInstaller;
   private agentId: string = '';
   private currentVersion: string = 'unknown';
@@ -292,6 +293,42 @@ export class Orchestrator {
    */
   private async handlePubNubControl(message: PubNubControlMessage): Promise<void> {
     this.logger.info(`PubNub control: ${message.type} (ui_action=${message.ui_action})`);
+
+    // Handle form responses from browser
+    if (message.type === 'form_response') {
+      const formMsg = message as unknown as PubNubFormResponseCommand;
+      const pending = this.pendingForms.get(formMsg.formId);
+      if (!pending) {
+        this.logger.warn(`Received form_response for unknown formId: ${formMsg.formId}`);
+        return;
+      }
+      // Clear pending form
+      this.pendingForms.delete(formMsg.formId);
+      // Forward to worker
+      this.actorManager.sendFormResponse(pending.sessionId, {
+        type: 'WORKER_FORM_RESPONSE',
+        sessionId: pending.sessionId,
+        taskId: pending.taskId,
+        formId: formMsg.formId,
+        response: formMsg.status === 'submitted'
+          ? { formId: formMsg.formId, status: 'submitted' as const, values: formMsg.values ?? {} }
+          : { formId: formMsg.formId, status: 'cancelled' as const },
+      });
+      // Update session status
+      const newStatus = formMsg.status === 'submitted' ? 'OPEN_RUNNING' : 'OPEN_IDLE';
+      updateSessionStatus(this.db, pending.sessionId, newStatus);
+      // Publish status change
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'session_status_changed',
+          agentId: this.agentId,
+          sessionId: pending.sessionId,
+          sessionStatus: newStatus,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return;
+    }
 
     if (message.ui_action === 'DELETE_SESSION' || message.type === 'session_deleted') {
       await this.handleDeleteSession(message.sessionId, message.sessionName);
@@ -805,6 +842,45 @@ export class Orchestrator {
         insertSessionMessage(this.db, sessionId, 'agent', event.question);
         enqueueOutbox(this.db, 'send_message', { sessionId, content: event.question }, sessionId);
         break;
+
+      case 'WORKER_FORM_REQUEST': {
+        const { formDefinition } = event;
+        // Track the pending form
+        this.pendingForms.set(formDefinition.formId, {
+          formId: formDefinition.formId,
+          sessionId,
+          taskId: event.taskId,
+        });
+        // Update session status
+        updateSessionStatus(this.db, sessionId, 'OPEN_INPUT_REQUIRED');
+        // Publish form_request event to browser via PubNub
+        if (this.pubnubAdapter) {
+          this.pubnubAdapter.publishEvent({
+            type: 'form_request',
+            agentId: this.agentId,
+            sessionId,
+            formDefinition,
+            timestamp: new Date().toISOString(),
+          }).catch((err) => {
+            this.logger.warn('PubNub form_request publish failed:', err);
+          });
+          // Also publish session status change
+          this.pubnubAdapter.publishEvent({
+            type: 'session_status_changed',
+            agentId: this.agentId,
+            sessionId,
+            sessionStatus: 'OPEN_INPUT_REQUIRED',
+            timestamp: new Date().toISOString(),
+          }).catch((err) => {
+            this.logger.warn('PubNub session_status_changed publish failed:', err);
+          });
+        }
+        // Persist form as a message via outbox (for page refresh survival)
+        const formContent = JSON.stringify(formDefinition);
+        insertSessionMessage(this.db, sessionId, 'agent', formContent);
+        enqueueOutbox(this.db, 'send_message', { sessionId, content: formContent }, sessionId);
+        break;
+      }
     }
   }
 
