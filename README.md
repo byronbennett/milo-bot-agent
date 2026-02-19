@@ -1,32 +1,50 @@
-# @milo-bot/agent
+# MiloBot Agent
 
-Remote control CLI for Claude Code. Communicate with your AI coding agent from anywhere.
+A local AI coding agent you control from your phone or browser. MiloBot runs as a daemon on your machine, receives tasks via real-time messaging, and orchestrates AI-powered coding sessions using multiple LLM providers — with crash-isolated workers, swappable personas, and a growing set of built-in tools.
 
-## Features
+## What It Does
 
-- Remote task delegation via web or messaging apps
-- Automatic session management
-- Smart auto-answer for common Claude Code questions
-- Multi-agent support
-- Works with any Claude Code installation
+- **Run coding tasks remotely** — Send instructions from your phone or browser; the agent does the work on your machine
+- **Multi-provider LLM support** — Use Anthropic (Claude), OpenAI (GPT-4, o1), Google (Gemini), or xAI models, switchable per-message
+- **Multi-session orchestration** — Run multiple isolated coding sessions in parallel, each in its own worker process
+- **Personas** — Hot-swap the agent's identity and behavior from the web UI without restarting
+- **Smart auto-answer** — Three-tier system (pattern matching, rules, AI judgment) handles routine questions so you don't have to babysit
+- **Structured forms** — The agent can request typed input (text, numbers, checkboxes, dropdowns) via the web UI
+- **Skills** — Install, update, and remove markdown-based skill definitions remotely from the browser
+- **Self-update** — Trigger updates from the web UI; the agent pulls, rebuilds, and restarts itself
+- **Real-time + reliable** — PubNub for instant delivery, REST polling as fallback, SQLite-backed message persistence
+
+## Built-in Tools
+
+Workers have access to a full set of coding tools:
+
+| Category | Tools |
+|----------|-------|
+| **File system** | `read_file`, `write_file`, `list_files`, `grep` |
+| **Shell** | `bash` (with dangerous command detection) |
+| **Git** | `git_status`, `git_diff`, `git_commit`, `git_log` |
+| **Network** | `web_fetch` (full HTTP client) |
+| **Delegation** | `claude_code_cli` (delegates to Claude Code via SDK) |
+| **Communication** | `notify_user`, `request_user_input` (structured forms) |
+| **Workspace** | `set_project` |
+
+Tool sets are configurable: `full`, `minimal` (no CLI agents), or `chat` (conversational only).
 
 ## Installation
 
 ```bash
-npm install -g @milo-bot/agent
+npm install -g milo-bot-agent
 ```
 
 Or with pnpm:
 
 ```bash
-pnpm add -g @milo-bot/agent
+pnpm add -g milo-bot-agent
 ```
 
 ## Quick Start
 
-1. **Get an API Key**
-
-   Visit [milobot.dev/settings](https://www.milobot.dev/settings) and create a new agent.
+1. **Get an API Key** — Visit [milobot.dev/settings](https://www.milobot.dev/settings) and create a new agent.
 
 2. **Initialize**
 
@@ -34,7 +52,7 @@ pnpm add -g @milo-bot/agent
    milo init
    ```
 
-   This creates your workspace at `~/milo-workspace` and configures your API key.
+   Creates your workspace at `~/milo-workspace` and configures your API key.
 
 3. **Start the Agent**
 
@@ -42,22 +60,27 @@ pnpm add -g @milo-bot/agent
    milo start
    ```
 
-   Your agent is now connected and ready to receive tasks!
+   Your agent is now connected and ready to receive tasks.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `milo init` | Initialize workspace and configure API key |
-| `milo start` | Start the agent and connect to server |
+| `milo start` | Start the agent daemon |
 | `milo stop` | Stop the running agent |
 | `milo status` | Check agent connection status |
 | `milo sessions` | List active and recent sessions |
 | `milo logs` | View agent logs |
 
-## Workspace Structure
+In-chat commands (sent as messages from the web UI):
 
-After initialization, your workspace looks like this:
+| Command | Description |
+|---------|-------------|
+| `/models` | List all available models based on configured API keys |
+| `/status` | Show agent version, uptime, models, tools, skills, and active sessions |
+
+## Workspace Structure
 
 ```
 ~/milo-workspace/
@@ -65,57 +88,74 @@ After initialization, your workspace looks like this:
 ├── config.json             # Agent configuration
 ├── MEMORY.md               # Long-term agent memory
 ├── RULES.md                # Auto-answer rules
-├── SESSION/                # Active sessions
+├── SESSIONS/               # Active session files
 │   └── archive/            # Completed sessions
+├── PERSONAS/               # Cached persona definitions
+├── SKILLS/                 # Skill definitions (.md files)
+├── TOOLS/                  # Custom tools
 ├── projects/               # Your project repos
-├── templates/              # Project templates
-└── tools/                  # Custom tools
+└── templates/              # Project templates
 ```
 
 ## Configuration
 
-Edit `~/milo-workspace/config.json` to customize:
+Edit `~/milo-workspace/config.json`:
 
 ```json
 {
   "agentName": "Milo",
-  "claudeCode": {
-    "maxConcurrentSessions": 3
+  "ai": {
+    "agent": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6-20250514"
+    },
+    "utility": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    }
   },
-  "scheduler": {
-    "heartbeatIntervalMinutes": 3
+  "maxConcurrentSessions": 3,
+  "update": {
+    "restartCommand": "pm2 restart milo"
   }
 }
 ```
 
+The **agent** model runs your coding tasks. The **utility** model handles lightweight operations like intent parsing and auto-answer decisions.
+
 ## Auto-Answer Rules
 
-Define rules in `RULES.md` to automatically answer common Claude Code questions:
+Define rules in `~/milo-workspace/RULES.md` to automatically handle routine questions:
 
 ```markdown
 ## Global Rules
 
-When Claude Code asks about folder permissions, answer "yes".
-When Claude Code asks about installing dependencies, answer "yes".
+When asked about folder permissions, answer "yes".
+When asked about installing dependencies, answer "yes".
 
 ## Dangerous Operations
 
-When Claude Code asks about force pushing, ask the user.
+When asked about force pushing, ask the user.
 ```
+
+The three-tier system tries pattern matching first, then checks your rules, and falls back to AI judgment only when needed.
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MILO_API_KEY` | Yes | Agent authentication key |
+| `ANTHROPIC_API_KEY` | No | Enables Claude models and AI-powered features |
+| `OPENAI_API_KEY` | No | Enables OpenAI models (GPT-4, o1, etc.) |
+| `GEMINI_API_KEY` | No | Enables Google Gemini models |
+| `MILO_API_URL` | No | Override API endpoint (default: milobot.dev) |
+
+API keys are stored securely in your OS keychain.
 
 ## Requirements
 
 - Node.js 20+
-- Claude Code installed and authenticated
 - MiloBot account at [milobot.dev](https://www.milobot.dev)
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `MILO_API_KEY` | Your agent API key |
-| `MILO_API_URL` | API URL (default: milobot.dev) |
-| `ANTHROPIC_API_KEY` | Claude API key (for AI features) |
 
 ## Support
 
