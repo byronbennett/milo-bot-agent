@@ -149,9 +149,12 @@ export function spawnUpdateDaemon(opts: DaemonOptions): void {
   const { agentPid, packageRoot, method, startCommand, workspaceDir } = opts;
   const scriptPath = join(workspaceDir, '.update-daemon.sh');
   const logPath = join(workspaceDir, 'update.log');
+  const restartScriptPath = join(workspaceDir, '.restart-agent.command');
 
-  // Shell-escape each arg for the start command
-  const quotedStart = startCommand.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+  // Shell-escape a string for use inside single quotes
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+
+  const quotedStart = startCommand.map((a) => `'${esc(a)}'`).join(' ');
 
   const updateSteps =
     method === 'git'
@@ -179,7 +182,7 @@ fi
 `;
 
   const script = `#!/bin/bash
-LOG='${logPath.replace(/'/g, "'\\''")}'
+LOG='${esc(logPath)}'
 TS=$(date -u +%FT%TZ)
 echo "[$TS] Update daemon started (agent PID: ${agentPid})" > "$LOG"
 
@@ -188,18 +191,40 @@ while kill -0 ${agentPid} 2>/dev/null; do sleep 1; done
 TS=$(date -u +%FT%TZ)
 echo "[$TS] Agent exited, starting update..." >> "$LOG"
 
-cd '${packageRoot.replace(/'/g, "'\\''")}'
+cd '${esc(packageRoot)}'
 ${updateSteps}
+# Write restart script (.command files open in Terminal.app on macOS)
+cat > '${esc(restartScriptPath)}' << 'MILO_RESTART_EOF'
+#!/bin/bash
+cd '${esc(packageRoot)}'
+exec ${quotedStart}
+MILO_RESTART_EOF
+chmod +x '${esc(restartScriptPath)}'
+
 # Restart agent
 TS=$(date -u +%FT%TZ)
 echo "[$TS] Restarting agent..." >> "$LOG"
-nohup ${quotedStart} >> "$LOG" 2>&1 &
-AGENT_NEW_PID=$!
-TS=$(date -u +%FT%TZ)
-echo "[$TS] Agent restarted (PID: $AGENT_NEW_PID)" >> "$LOG"
 
-# Cleanup
-rm -f '${scriptPath.replace(/'/g, "'\\''")}'
+if [[ "$(uname)" == "Darwin" ]]; then
+  open '${esc(restartScriptPath)}' >> "$LOG" 2>&1
+  if [ $? -eq 0 ]; then
+    TS=$(date -u +%FT%TZ)
+    echo "[$TS] Agent restarted in Terminal window" >> "$LOG"
+  else
+    nohup ${quotedStart} >> "$LOG" 2>&1 &
+    AGENT_NEW_PID=$!
+    TS=$(date -u +%FT%TZ)
+    echo "[$TS] Terminal launch failed, agent restarted headless (PID: $AGENT_NEW_PID)" >> "$LOG"
+  fi
+else
+  nohup ${quotedStart} >> "$LOG" 2>&1 &
+  AGENT_NEW_PID=$!
+  TS=$(date -u +%FT%TZ)
+  echo "[$TS] Agent restarted headless (PID: $AGENT_NEW_PID)" >> "$LOG"
+fi
+
+# Cleanup daemon script
+rm -f '${esc(scriptPath)}'
 exit 0
 `;
 
