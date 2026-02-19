@@ -1,3 +1,4 @@
+import { spawn } from 'child_process';
 import { Type } from '@mariozechner/pi-ai';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { ToolContext } from './index.js';
@@ -8,6 +9,17 @@ import type {
 import { shouldAutoAnswer } from '../auto-answer/index.js';
 import { handleMessage, extractTextFromContent } from './claude-event-handler.js';
 import { assertProjectConfirmed } from './project-guard.js';
+import {
+  findCodexBinary,
+  buildCodexArgs,
+  escalatingKill,
+  CODEX_TIMEOUT_MS,
+} from './codex-cli-runtime.js';
+import {
+  handleCodexEvent,
+  parseCodexLine,
+  type CodexEventState,
+} from './codex-event-handler.js';
 
 const ClaudeCodeParams = Type.Object({
   prompt: Type.String({ description: 'Detailed task description or follow-up message for Claude Code' }),
@@ -23,12 +35,30 @@ const ClaudeCodeParams = Type.Object({
   ),
 });
 
+const CodexParams = Type.Object({
+  prompt: Type.String({ description: 'Detailed task description or follow-up message for Codex CLI' }),
+  sessionId: Type.Optional(
+    Type.String({
+      description:
+        'Resume an existing Codex session by thread ID. Omit to start a new session. ' +
+        'Use this to continue a multi-turn conversation with Codex.',
+    }),
+  ),
+  workingDirectory: Type.Optional(
+    Type.String({ description: 'Override working directory (default: project directory)' }),
+  ),
+  model: Type.Optional(
+    Type.String({ description: 'Override model (default: gpt-5.3-codex). Examples: o3, gpt-5.3-codex' }),
+  ),
+});
+
 const SimplePromptParams = Type.Object({
   prompt: Type.String({ description: 'Task description' }),
 });
 
 // Track known session IDs for resume validation
 const knownSessionIds = new Set<string>();
+const knownCodexSessionIds = new Set<string>();
 
 /**
  * Build the canUseTool callback for Claude Code Agent SDK.
@@ -194,14 +224,164 @@ export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
     },
   };
 
-  const codexCliTool: AgentTool<typeof SimplePromptParams> = {
+  const codexCliTool: AgentTool<typeof CodexParams> = {
     name: 'codex_cli',
-    label: 'OpenAI Codex CLI',
-    description: 'Delegate a task to OpenAI Codex CLI (not yet implemented).',
-    parameters: SimplePromptParams,
-    execute: async (_toolCallId, _params) => {
-      assertProjectConfirmed(ctx.projectPath, ctx.workspaceDir);
-      throw new Error('Codex CLI integration is not yet implemented.');
+    label: 'OpenAI Codex CLI (AI Coding Agent)',
+    description:
+      'Delegate a coding task to OpenAI Codex CLI, an AI coding agent. Codex can read/write files, run commands, and execute multi-step coding workflows. ' +
+      'Use this for coding tasks when you want to leverage OpenAI models (o3, gpt-5.3-codex, etc.). ' +
+      'Supports multi-turn conversations: the first call returns a session_id (thread ID), pass it back on subsequent calls to continue the conversation.',
+    parameters: CodexParams,
+    execute: async (_toolCallId, params, signal, onUpdate) => {
+      const codexBinary = await findCodexBinary();
+      const cwd = params.workingDirectory ?? ctx.projectPath;
+      assertProjectConfirmed(cwd, ctx.workspaceDir);
+      const isResume = params.sessionId && knownCodexSessionIds.has(params.sessionId);
+
+      onUpdate?.({
+        content: [{
+          type: 'text',
+          text: isResume
+            ? `Resuming Codex CLI session ${params.sessionId}...`
+            : 'Starting new Codex CLI session...',
+        }],
+        details: {},
+      });
+
+      // Build args
+      const args = buildCodexArgs({
+        prompt: params.prompt,
+        cwd,
+        sessionId: isResume ? params.sessionId : undefined,
+        model: params.model,
+      });
+
+      // Set up environment: copy process.env, ensure CODEX_API_KEY is set
+      const env = { ...process.env };
+      if (!env.CODEX_API_KEY && env.OPENAI_API_KEY) {
+        env.CODEX_API_KEY = env.OPENAI_API_KEY;
+      }
+
+      const startTime = Date.now();
+
+      // Spawn the codex process
+      const proc = spawn(codexBinary, args, {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env,
+      });
+
+      // Wire abort signal
+      const onAbort = () => escalatingKill(proc);
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      const cleanupAbort = () => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+      };
+      proc.on('close', cleanupAbort);
+
+      // Process timeout
+      const timeout = setTimeout(() => {
+        escalatingKill(proc);
+      }, CODEX_TIMEOUT_MS);
+
+      // State for event handling
+      const state: CodexEventState = { lastAssistantText: '', errors: [] };
+      let sessionId: string | undefined;
+      let usage: { input_tokens?: number; output_tokens?: number } | undefined;
+      let stderrOutput = '';
+
+      // Collect stderr
+      proc.stderr?.on('data', (chunk: Buffer) => {
+        stderrOutput += chunk.toString();
+      });
+
+      // Parse JSONL from stdout
+      await new Promise<void>((resolve, reject) => {
+        let buffer = '';
+
+        proc.stdout?.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString();
+
+          let idx: number;
+          while ((idx = buffer.indexOf('\n')) !== -1) {
+            const line = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 1);
+
+            const event = parseCodexLine(line);
+            if (!event) continue;
+
+            handleCodexEvent(event, {
+              onSessionId: (id) => {
+                sessionId = id;
+                knownCodexSessionIds.add(id);
+              },
+              onAssistantText: () => { /* state tracks this */ },
+              onUsage: (u) => {
+                usage = u;
+              },
+              onError: () => { /* state tracks this */ },
+              sendIpcEvent: (evt) => {
+                ctx.sendIpcEvent?.(evt);
+              },
+            }, state);
+          }
+        });
+
+        proc.on('close', (code) => {
+          clearTimeout(timeout);
+
+          if (code !== 0 && !state.lastAssistantText && state.errors.length === 0) {
+            // Check for auth-related errors in stderr
+            const lowerStderr = stderrOutput.toLowerCase();
+            if (lowerStderr.includes('auth') || lowerStderr.includes('api_key') || lowerStderr.includes('token') || lowerStderr.includes('unauthorized')) {
+              reject(new Error(
+                `Codex CLI authentication failed. Please ensure OPENAI_API_KEY is set, or run:\n  codex login\n\nStderr: ${stderrOutput.slice(0, 500)}`,
+              ));
+              return;
+            }
+            reject(new Error(
+              `Codex CLI exited with code ${code}.\nStderr: ${stderrOutput.slice(0, 500)}`,
+            ));
+            return;
+          }
+
+          resolve();
+        });
+
+        proc.on('error', (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+      });
+
+      const durationMs = Date.now() - startTime;
+
+      // Build output
+      let output: string;
+      if (state.errors.length > 0 && !state.lastAssistantText) {
+        output = `Codex CLI ended with errors: ${state.errors.join('; ')}`;
+      } else if (state.lastAssistantText) {
+        output = state.lastAssistantText;
+      } else {
+        output = 'No output from Codex CLI.';
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: output +
+            (sessionId
+              ? `\n\n[Codex CLI session_id: ${sessionId} — pass this to continue the conversation]`
+              : ''),
+        }],
+        details: {
+          session_id: sessionId,
+          usage,
+          duration_ms: durationMs,
+        },
+      };
     },
   };
 
