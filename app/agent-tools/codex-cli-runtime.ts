@@ -134,15 +134,17 @@ export function buildCodexArgs(opts: CodexArgs): string[] {
 export function escalatingKill(proc: ChildProcess): void {
   try { proc.kill('SIGINT'); } catch { /* already dead */ }
 
-  setTimeout(() => {
+  const t1 = setTimeout(() => {
     if (!proc.killed) {
       try { proc.kill('SIGTERM'); } catch { /* */ }
     }
   }, 4000);
+  t1.unref();
 
-  setTimeout(() => {
+  const t2 = setTimeout(() => {
     if (!proc.killed) {
       try { proc.kill('SIGKILL'); } catch { /* */ }
     }
   }, 7000);
+  t2.unref();
 }

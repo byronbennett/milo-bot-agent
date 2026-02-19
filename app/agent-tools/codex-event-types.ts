@@ -72,7 +72,7 @@ export interface CodexFileChangeItem {
     kind: string;
     diff?: string;
   }>;
-  status?: string;
+  status?: 'inProgress' | 'completed' | 'failed' | 'declined';
 }
 
 export interface CodexReasoningItem {

@@ -138,18 +138,6 @@ describe('codex_cli tool', () => {
   });
 
   it('throws on non-zero exit with stderr containing auth error', async () => {
-    const proc = createMockProcess([], 1);
-    // Push stderr data before the process closes
-    const origEmit = proc.emit.bind(proc);
-    proc.emit = function (event: string, ...args: any[]) {
-      return origEmit(event, ...args);
-    } as any;
-
-    mockSpawn.mockReturnValue(proc);
-
-    // Override: push stderr data before close
-    const stderrProc = createMockProcess([], 1);
-    // We need to push stderr data and then close
     const stderrStream = new Readable({ read() {} });
     const errProc = Object.assign(new EventEmitter(), {
       stdout: new Readable({ read() {} }),
