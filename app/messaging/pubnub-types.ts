@@ -52,6 +52,7 @@ export type PubNubEventType =
   | 'task_cancelled'
   | 'ui_action_result'
   | 'tool_use'
+  | 'form_request'
   | 'error';
 
 export interface PubNubEventMessage {
@@ -92,6 +93,8 @@ export interface PubNubEventMessage {
   skillVersion?: string;
   skillSuccess?: boolean;
   skillError?: string | null;
+  /** Form definition for form_request events */
+  formDefinition?: import('../shared/form-types.js').FormDefinition;
   timestamp: string;
 }
 
@@ -106,6 +109,18 @@ export interface PubNubSkillCommand {
     filename: string;
   };
   requestId: string;
+}
+
+/** Form response from browser (received on cmd channel) */
+export interface PubNubFormResponseCommand {
+  type: 'form_response';
+  messageId: string;
+  agentId: string;
+  sessionId: string;
+  formId: string;
+  status: 'submitted' | 'cancelled';
+  values?: Record<string, string | number | boolean>;
+  timestamp: string;
 }
 
 /** Response from POST /api/pubnub/token/agent */
