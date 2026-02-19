@@ -83,6 +83,10 @@ export interface PubNubEventMessage {
       provider: string;
       models: Array<{ id: string; name: string }>;
     }>;
+    localModels?: Array<{
+      provider: string;
+      models: string[];
+    }>;
   };
   /** Tool name for tool_use events */
   toolName?: string;
