@@ -10,6 +10,7 @@ describe('loadTools', () => {
     expect(names).toContain('bash');
     expect(names).toContain('web_fetch');
     expect(names).toContain('claude_code');
+    expect(names).toContain('codex_cli');
     expect(names).toContain('notify_user');
   });
 
@@ -33,5 +34,18 @@ describe('loadTools', () => {
     const tools = loadTools(['bash', 'read_file'], ctx);
     expect(tools).toHaveLength(2);
     expect(tools.map((t) => t.name).sort()).toEqual(['bash', 'read_file']);
+  });
+
+  it('codex_cli tool has correct parameter schema', () => {
+    const tools = loadTools('full', ctx);
+    const codexTool = tools.find((t) => t.name === 'codex_cli');
+    expect(codexTool).toBeDefined();
+
+    const schema = codexTool!.parameters;
+    const props = schema.properties;
+    expect(props).toHaveProperty('prompt');
+    expect(props).toHaveProperty('sessionId');
+    expect(props).toHaveProperty('workingDirectory');
+    expect(props).toHaveProperty('model');
   });
 });
