@@ -1,7 +1,7 @@
 import type { WebAppAdapter } from '../messaging/webapp-adapter.js';
-import { createLogger } from '../utils/logger.js';
+import { Logger } from '../utils/logger.js';
 
-const logger = createLogger('curated-models');
+const logger = new Logger({ prefix: '[curated-models]' });
 
 interface CachedData {
   /** provider -> Set of allowed model IDs */

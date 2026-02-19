@@ -67,6 +67,17 @@ export const defaultConfig: AgentConfig = {
     enabled: true,
   },
   update: {},
+  localModels: {
+    ollama: {
+      enabled: true,
+      port: 11434,
+    },
+    lmStudio: {
+      enabled: true,
+      port: 1234,
+    },
+    timeoutMs: 2000,
+  },
   streaming: false,
   onboardingComplete: false,
 };

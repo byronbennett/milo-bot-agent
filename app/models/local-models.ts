@@ -1,7 +1,7 @@
 import type { AgentConfig } from '../config/schema.js';
-import { createLogger } from '../utils/logger.js';
+import { Logger } from '../utils/logger.js';
 
-const logger = createLogger('local-models');
+const logger = new Logger({ prefix: '[local-models]' });
 
 export interface LocalModel {
   name: string;
