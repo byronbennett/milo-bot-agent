@@ -64,6 +64,155 @@ export function getDateRange(period: string, now = new Date()): { start: Date; e
 }
 
 // ---------------------------------------------------------------------------
+// Report formatting helpers (private)
+// ---------------------------------------------------------------------------
+
+function formatNumber(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+function formatReport(
+  provider: string,
+  start: Date,
+  end: Date,
+  modelUsage: Map<string, { input: number; output: number }>,
+  modelCosts: Map<string, number>,
+  totalCostCents: number,
+): string {
+  const startStr = start.toISOString().split('T')[0];
+  const endStr = end.toISOString().split('T')[0];
+  const lines: string[] = [];
+
+  lines.push(`${provider} Usage Report (${startStr} to ${endStr})`);
+  lines.push('');
+
+  if (modelUsage.size === 0) {
+    lines.push('No usage data found for this period.');
+    return lines.join('\n');
+  }
+
+  const hasCosts = totalCostCents > 0;
+  if (hasCosts) {
+    lines.push('Model                        | Input Tokens  | Output Tokens | Cost (USD)');
+    lines.push('-----------------------------|--------------|--------------|----------');
+  } else {
+    lines.push('Model                        | Input Tokens  | Output Tokens');
+    lines.push('-----------------------------|--------------|-------------');
+  }
+
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  for (const [model, usage] of modelUsage) {
+    totalInput += usage.input;
+    totalOutput += usage.output;
+    const cost = modelCosts.get(model) ?? 0;
+    const modelPadded = model.padEnd(28);
+    const inputPadded = formatNumber(usage.input).padStart(13);
+    const outputPadded = formatNumber(usage.output).padStart(13);
+    if (hasCosts) {
+      const costStr = `$${(cost / 100).toFixed(2)}`.padStart(10);
+      lines.push(`${modelPadded} | ${inputPadded} | ${outputPadded} | ${costStr}`);
+    } else {
+      lines.push(`${modelPadded} | ${inputPadded} | ${outputPadded}`);
+    }
+  }
+
+  lines.push('');
+  if (hasCosts) {
+    lines.push(`Total: ${formatNumber(totalInput)} input / ${formatNumber(totalOutput)} output tokens | $${(totalCostCents / 100).toFixed(2)}`);
+  } else {
+    lines.push(`Total: ${formatNumber(totalInput)} input / ${formatNumber(totalOutput)} output tokens`);
+  }
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic usage + cost fetch
+// ---------------------------------------------------------------------------
+
+export async function fetchAnthropicUsage(
+  adminKey: string,
+  start: Date,
+  end: Date,
+): Promise<string> {
+  const headers: Record<string, string> = {
+    'x-api-key': adminKey,
+    'anthropic-version': '2023-06-01',
+  };
+
+  // Fetch usage data grouped by model
+  const usageParams = new URLSearchParams({
+    starting_at: start.toISOString(),
+    ending_at: end.toISOString(),
+    bucket_width: '1d',
+  });
+  usageParams.append('group_by[]', 'model');
+
+  const usageRes = await fetch(
+    `https://api.anthropic.com/v1/organizations/usage_report/messages?${usageParams}`,
+    { headers },
+  );
+
+  if (!usageRes.ok) {
+    const body = await usageRes.text();
+    if (usageRes.status === 401 || usageRes.status === 403) {
+      return `Anthropic auth failed (${usageRes.status}). Your admin key may be invalid or expired.\nGet a new one at: https://console.anthropic.com/settings/admin-keys`;
+    }
+    return `Anthropic API error ${usageRes.status}: ${body}`;
+  }
+
+  const usageData = await usageRes.json();
+
+  // Aggregate by model
+  const modelUsage = new Map<string, { input: number; output: number }>();
+  for (const bucket of usageData.data ?? []) {
+    const model = bucket.model ?? 'unknown';
+    const existing = modelUsage.get(model) ?? { input: 0, output: 0 };
+    existing.input += bucket.input_tokens ?? 0;
+    existing.output += bucket.output_tokens ?? 0;
+    modelUsage.set(model, existing);
+  }
+
+  // Fetch cost data
+  const costParams = new URLSearchParams({
+    starting_at: start.toISOString(),
+    ending_at: end.toISOString(),
+    bucket_width: '1d',
+  });
+  costParams.append('group_by[]', 'description');
+
+  let totalCostCents = 0;
+  const modelCosts = new Map<string, number>();
+
+  try {
+    const costRes = await fetch(
+      `https://api.anthropic.com/v1/organizations/cost_report?${costParams}`,
+      { headers },
+    );
+
+    if (costRes.ok) {
+      const costData = await costRes.json();
+      for (const bucket of costData.data ?? []) {
+        const cents = bucket.cost_cents ?? 0;
+        totalCostCents += cents;
+        const desc = bucket.description ?? '';
+        const modelMatch = desc.match(/:\s*(.+)/);
+        if (modelMatch) {
+          const model = modelMatch[1].trim();
+          modelCosts.set(model, (modelCosts.get(model) ?? 0) + cents);
+        }
+      }
+    }
+  } catch {
+    // Cost fetch is best-effort
+  }
+
+  return formatReport('Anthropic', start, end, modelUsage, modelCosts, totalCostCents);
+}
+
+// ---------------------------------------------------------------------------
 // Tool factory
 // ---------------------------------------------------------------------------
 

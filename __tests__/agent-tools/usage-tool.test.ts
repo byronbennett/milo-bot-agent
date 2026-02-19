@@ -1,4 +1,4 @@
-import { createUsageTool, getDateRange } from '../../app/agent-tools/usage-tool.js';
+import { createUsageTool, getDateRange, fetchAnthropicUsage } from '../../app/agent-tools/usage-tool.js';
 
 describe('createUsageTool', () => {
   it('returns a tool with correct name and label', () => {
@@ -91,6 +91,83 @@ describe('getDateRange', () => {
     const { start, end } = getDateRange('month', now);
     expect(start.toISOString()).toBe('2026-02-01T00:00:00.000Z');
     expect(end.toISOString()).toBe('2026-02-19T15:30:00.000Z');
+  });
+});
+
+describe('fetchAnthropicUsage', () => {
+  it('calls correct URL with admin key and returns formatted report', async () => {
+    const mockUsageResponse = {
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            snapshot_at: '2026-02-19T00:00:00Z',
+            model: 'claude-sonnet-4-6',
+            input_tokens: 100000,
+            output_tokens: 50000,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        ],
+        has_more: false,
+      }),
+    };
+    const mockCostResponse = {
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            snapshot_at: '2026-02-19T00:00:00Z',
+            description: 'Claude API: claude-sonnet-4-6',
+            cost_cents: 150,
+          },
+        ],
+        has_more: false,
+      }),
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      if (typeof url === 'string' && url.includes('usage_report')) return mockUsageResponse;
+      if (typeof url === 'string' && url.includes('cost_report')) return mockCostResponse;
+      return mockUsageResponse;
+    }) as any;
+
+    try {
+      const report = await fetchAnthropicUsage(
+        'sk-ant-admin-test',
+        new Date('2026-02-12T00:00:00Z'),
+        new Date('2026-02-19T00:00:00Z'),
+      );
+      expect(report).toContain('Anthropic');
+      expect(report).toContain('claude-sonnet-4-6');
+      expect(report).toContain('100,000');
+      expect(report).toContain('50,000');
+      expect(report).toContain('$1.50');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns auth error message on 401', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 401,
+      text: async () => 'Unauthorized',
+    })) as any;
+
+    try {
+      const report = await fetchAnthropicUsage(
+        'bad-key',
+        new Date('2026-02-12T00:00:00Z'),
+        new Date('2026-02-19T00:00:00Z'),
+      );
+      expect(report).toContain('auth failed');
+      expect(report).toContain('console.anthropic.com');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
