@@ -419,10 +419,47 @@ export function createUsageTool(deps: UsageToolDeps): AgentTool<typeof CheckUsag
         };
       }
 
-      // Form submitted — placeholder for API call (will be wired up in a later task)
+      // 4. Call the selected provider's API
+      const providerId = response.values.provider as string;
+      const period = response.values.period as string;
+      const { start, end } = getDateRange(period);
+
+      const selected = available.find((a) => a.provider.id === providerId);
+      if (!selected) {
+        return {
+          content: [{ type: 'text' as const, text: `Unknown provider: ${providerId}` }],
+          details: { error: 'unknown_provider' },
+        };
+      }
+
+      let report: string;
+      try {
+        switch (providerId) {
+          case 'anthropic':
+            report = await fetchAnthropicUsage(selected.key, start, end);
+            break;
+          case 'openai':
+            report = await fetchOpenAIUsage(selected.key, start, end);
+            break;
+          case 'xai': {
+            const teamId = await deps.loadAdminKey('xai-team-id');
+            if (!teamId) {
+              report = 'xAI team ID not configured.\nStore it with: milo config set-key usage xai-team-id <your-team-id>\nFind it at: https://console.x.ai → Settings';
+              break;
+            }
+            report = await fetchXaiUsage(selected.key, teamId);
+            break;
+          }
+          default:
+            report = `Provider ${providerId} is not yet supported.`;
+        }
+      } catch (err) {
+        report = `Error fetching ${providerId} usage: ${err instanceof Error ? err.message : String(err)}`;
+      }
+
       return {
-        content: [{ type: 'text' as const, text: `Usage check submitted for provider: ${response.values.provider}, period: ${response.values.period}. API integration coming soon.` }],
-        details: {},
+        content: [{ type: 'text' as const, text: report }],
+        details: { provider: providerId, period },
       };
     },
   };

@@ -256,6 +256,101 @@ describe('fetchOpenAIUsage', () => {
   });
 });
 
+describe('execute end-to-end', () => {
+  it('returns Anthropic report when form is submitted', async () => {
+    const mockResponse = {
+      ok: true,
+      json: async () => ({
+        data: [
+          { model: 'claude-sonnet-4-6', input_tokens: 50000, output_tokens: 20000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        ],
+        has_more: false,
+      }),
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => mockResponse) as any;
+
+    try {
+      const tool = createUsageTool({
+        loadAdminKey: async (name) => (name === 'anthropic-admin-key' ? 'sk-admin-test' : null),
+        requestForm: async (def) => ({
+          formId: def.formId,
+          status: 'submitted' as const,
+          values: { provider: 'anthropic', period: '7d' },
+        }),
+      });
+
+      const result = await tool.execute('call-1', {});
+      expect(result.content[0].text).toContain('Anthropic');
+      expect(result.content[0].text).toContain('50,000');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns OpenAI report when form is submitted', async () => {
+    const mockUsageResponse = {
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            start_time: 1739836800,
+            end_time: 1739923200,
+            results: [
+              { model: 'gpt-4o', input_tokens: 100000, output_tokens: 40000, num_model_requests: 200 },
+            ],
+          },
+        ],
+      }),
+    };
+    const mockCostResponse = {
+      ok: true,
+      json: async () => ({ data: [] }),
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      if (typeof url === 'string' && url.includes('/costs')) return mockCostResponse;
+      return mockUsageResponse;
+    }) as any;
+
+    try {
+      const tool = createUsageTool({
+        loadAdminKey: async (name) => (name === 'openai-admin-key' ? 'sk-admin-test' : null),
+        requestForm: async (def) => ({
+          formId: def.formId,
+          status: 'submitted' as const,
+          values: { provider: 'openai', period: '30d' },
+        }),
+      });
+
+      const result = await tool.execute('call-1', {});
+      expect(result.content[0].text).toContain('OpenAI');
+      expect(result.content[0].text).toContain('100,000');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns xAI missing team-id message when team-id not configured', async () => {
+    const tool = createUsageTool({
+      loadAdminKey: async (name) => {
+        if (name === 'xai-management-key') return 'mgmt-key-test';
+        return null;  // xai-team-id returns null
+      },
+      requestForm: async (def) => ({
+        formId: def.formId,
+        status: 'submitted' as const,
+        values: { provider: 'xai', period: '7d' },
+      }),
+    });
+
+    const result = await tool.execute('call-1', {});
+    expect(result.content[0].text).toContain('team ID not configured');
+  });
+});
+
 describe('fetchXaiUsage', () => {
   it('returns balance info when team_id and key are available', async () => {
     const mockBalanceResponse = {
