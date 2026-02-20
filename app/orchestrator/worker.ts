@@ -18,6 +18,7 @@ import type {
   WorkerAnswerMessage,
   WorkerFormResponseMessage,
   WorkerToOrchestrator,
+  ContextSize,
 } from './ipc-types.js';
 import type { FormDefinition, FormResponse } from '../shared/form-types.js';
 import { sendNotification } from '../utils/notify.js';
@@ -39,6 +40,9 @@ let projectChanged = false;
 
 // pi-agent-core Agent (lazy, kept alive across tasks)
 let agent: import('@mariozechner/pi-agent-core').Agent | null = null;
+
+/** Store model's context window for reporting */
+let modelContextWindow = 200_000; // default, updated on agent creation
 
 // Pending answers for tool safety questions
 const pendingAnswers = new Map<string, (answer: string) => void>();
@@ -87,7 +91,27 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   initialized = true;
   log(`Initialized (project=${projectPath})`);
 
-  send({ type: 'WORKER_READY', sessionId, pid: process.pid });
+  send({ type: 'WORKER_READY', sessionId, pid: process.pid, contextSize: getContextSize() });
+}
+
+function getContextSize(): ContextSize {
+  const systemPrompt = agent?.state.systemPrompt ?? '';
+  const systemPromptTokens = Math.ceil(systemPrompt.length / 4);
+
+  let conversationTokens = 0;
+  if (agent?.state.messages) {
+    for (const msg of agent.state.messages) {
+      if ('content' in msg && typeof msg.content === 'string') {
+        conversationTokens += Math.ceil(msg.content.length / 4);
+      }
+    }
+  }
+
+  return {
+    systemPromptTokens,
+    conversationTokens,
+    maxTokens: modelContextWindow,
+  };
 }
 
 /**
@@ -163,6 +187,7 @@ When asked to research something (find YouTube channels, compare options, gather
   const provider = initConfig.agentProvider ?? 'anthropic';
   const resolvedModelId = modelId ?? initConfig.agentModel ?? 'claude-sonnet-4-6-20250514';
   const model = getModel(provider as any, resolvedModelId as any);
+  modelContextWindow = model.contextWindow ?? 200_000;
 
   // Resolve tool set
   const toolSet = initConfig.toolSet ?? 'full';
@@ -440,6 +465,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
         sessionId,
         success: true,
         output: output || 'Task completed.',
+        contextSize: getContextSize(),
       });
     }
   } catch (err) {
@@ -455,12 +481,13 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
         sessionId,
         success: false,
         error,
+        contextSize: getContextSize(),
       });
     }
   } finally {
     currentTaskId = null;
     cancelRequested = false;
-    send({ type: 'WORKER_READY', sessionId, pid: process.pid });
+    send({ type: 'WORKER_READY', sessionId, pid: process.pid, contextSize: getContextSize() });
   }
 }
 
