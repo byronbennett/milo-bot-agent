@@ -43,6 +43,8 @@ import { loadTools, type ToolContext } from '../agent-tools/index.js';
 import { discoverSkills } from '../skills/skills-registry.js';
 import { getCuratedAllowList, invalidateCuratedCache } from '../models/curated-models.js';
 import { detectLocalModels } from '../models/local-models.js';
+import { encrypt, decrypt, deriveKey, unwrapDEK } from '../crypto/encryption.js';
+import { loadEncryptionPassword } from '../utils/keychain.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -76,6 +78,7 @@ export class Orchestrator {
   private needsUpdate = false;
   private installMethod: InstallMethod = 'git';
   private updateCheckTimer: NodeJS.Timeout | null = null;
+  private dek: Buffer | null = null;
 
   constructor(options: OrchestratorOptions) {
     this.config = options.config;
@@ -115,7 +118,27 @@ export class Orchestrator {
     const projectsDir = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
     mkdirSync(projectsDir, { recursive: true });
 
-    // 1b. Recover orphaned sessions from prior crash
+    // 1b. Load DEK for message encryption if encryption is enabled
+    if (this.config.encryption.level > 1) {
+      try {
+        const password = await loadEncryptionPassword();
+        if (!password) {
+          this.logger.warn('Encryption level > 1 but no encryption password found in keychain. Messages will NOT be encrypted.');
+        } else if (!this.config.encryption.salt || !this.config.encryption.wrappedDEK || !this.config.encryption.wrappedDEKIV) {
+          this.logger.warn('Encryption level > 1 but missing salt/wrappedDEK/wrappedDEKIV in config. Messages will NOT be encrypted.');
+        } else {
+          const salt = Buffer.from(this.config.encryption.salt, 'base64');
+          const masterKey = deriveKey(password, salt);
+          this.dek = unwrapDEK(this.config.encryption.wrappedDEK, this.config.encryption.wrappedDEKIV, masterKey);
+          this.logger.info('Encryption DEK loaded successfully');
+        }
+      } catch (err) {
+        this.logger.error('Failed to load encryption DEK:', err);
+        this.logger.warn('Messages will NOT be encrypted.');
+      }
+    }
+
+    // 1c. Recover orphaned sessions from prior crash
     this.recoverOrphanedSessions();
 
     // 2. Create session actor manager
@@ -262,6 +285,9 @@ export class Orchestrator {
   private async handlePubNubMessage(message: PendingMessage): Promise<void> {
     this.logger.info(`PubNub message: ${message.id}`);
 
+    // Decrypt incoming message content if encryption is active
+    message = { ...message, content: this.decryptContent(message.content) };
+
     // 1. Dedup + persist to inbox
     const isNew = insertInbox(this.db, {
       message_id: message.id,
@@ -277,9 +303,9 @@ export class Orchestrator {
       return;
     }
 
-    // 2. Publish fast receipt
+    // 2. Publish fast receipt (encrypt if encryption is active)
     if (this.pubnubAdapter) {
-      await this.pubnubAdapter.sendMessage('Message received. Processing...', message.sessionId);
+      await this.pubnubAdapter.sendMessage(this.encryptContent('Message received. Processing...'), message.sessionId);
     }
 
     // 3. Enqueue REST ack in outbox
@@ -571,7 +597,10 @@ export class Orchestrator {
       if (pending.length === 0) return;
 
       this.logger.info(`Catching up on ${pending.length} missed messages`);
-      for (const msg of pending) {
+      for (let msg of pending) {
+        // Decrypt incoming message content if encryption is active
+        msg = { ...msg, content: this.decryptContent(msg.content) };
+
         // Dedup via inbox
         const isNew = insertInbox(this.db, {
           message_id: msg.id,
@@ -605,7 +634,8 @@ export class Orchestrator {
         sessionId: item.session_id,
         sessionName: item.session_name ?? null,
         sessionType: (item.session_type as 'chat' | 'bot') || 'bot',
-        content: item.content,
+        // Decrypt in case inbox was persisted before decryption could happen
+        content: this.decryptContent(item.content),
         createdAt: item.received_at,
       };
       // Fire-and-forget since these are recovery items
@@ -767,7 +797,7 @@ export class Orchestrator {
             type: 'agent_message',
             agentId: this.agentId,
             sessionId,
-            content,
+            content: this.encryptContent(content),
             contextSize: event.contextSize,
             timestamp: new Date().toISOString(),
           }).catch((err) => {
@@ -849,7 +879,7 @@ export class Orchestrator {
             type: 'file_send',
             agentId: this.agentId,
             sessionId,
-            content: fileContent,
+            content: this.encryptContent(fileContent),
             fileContents: fileData,
             timestamp: new Date().toISOString(),
           }).catch((err) => {
@@ -875,7 +905,7 @@ export class Orchestrator {
             type: 'context_cleared',
             agentId: this.agentId,
             sessionId,
-            content,
+            content: this.encryptContent(content),
             contextSize: event.contextSize,
             timestamp: new Date().toISOString(),
           }).catch((err) => {
@@ -901,7 +931,7 @@ export class Orchestrator {
             type: 'context_compacted',
             agentId: this.agentId,
             sessionId,
-            content,
+            content: this.encryptContent(content),
             summary: event.summary,
             contextSize: event.contextSize,
             timestamp: new Date().toISOString(),
@@ -1129,10 +1159,12 @@ export class Orchestrator {
 
   /**
    * Publish an event to the user via PubNub (single publisher).
+   * Encrypts content if encryption is active.
    */
   private publishEvent(sessionId: string, content: string): void {
     if (this.pubnubAdapter?.isConnected) {
-      this.pubnubAdapter.sendMessage(content, sessionId).catch((err) => {
+      const encrypted = this.encryptContent(content);
+      this.pubnubAdapter.sendMessage(encrypted, sessionId).catch((err) => {
         this.logger.warn('PubNub publish failed:', err);
       });
     }
@@ -1158,7 +1190,7 @@ export class Orchestrator {
     text: string,
   ): void {
     if (this.pubnubAdapter?.isConnected) {
-      this.pubnubAdapter.publishModelsList(sessionId, models, text).catch((err) => {
+      this.pubnubAdapter.publishModelsList(sessionId, models, this.encryptContent(text)).catch((err) => {
         this.logger.warn('PubNub models list publish failed:', err);
       });
     }
@@ -1183,9 +1215,12 @@ export class Orchestrator {
           case 'ack_message':
             await this.restAdapter.acknowledgeMessages(payload.messageIds);
             break;
-          case 'send_message':
-            await this.restAdapter.sendMessage(payload.content, payload.sessionId, payload.formData, payload.fileData);
+          case 'send_message': {
+            // Encrypt outgoing message content if encryption is active
+            const content = this.encryptContent(payload.content);
+            await this.restAdapter.sendMessage(content, payload.sessionId, payload.formData, payload.fileData);
             break;
+          }
           default:
             this.logger.warn(`Unknown outbox event type: ${item.event_type}`);
         }
@@ -1217,7 +1252,10 @@ export class Orchestrator {
       // If no PubNub, poll for messages
       if (!this.pubnubAdapter?.isConnected) {
         const pending = await this.restAdapter.getPendingMessages();
-        for (const msg of pending) {
+        for (let msg of pending) {
+          // Decrypt incoming message content if encryption is active
+          msg = { ...msg, content: this.decryptContent(msg.content) };
+
           const isNew = insertInbox(this.db, {
             message_id: msg.id,
             session_id: msg.sessionId,
@@ -1333,6 +1371,24 @@ export class Orchestrator {
   }
 
   // --- Helpers ---
+
+  /**
+   * Encrypt content if DEK is available (encryption active).
+   * Pass-through if no DEK (encryption level 1 / disabled).
+   */
+  private encryptContent(content: string): string {
+    if (!this.dek) return content;
+    return encrypt(content, this.dek);
+  }
+
+  /**
+   * Decrypt content if DEK is available (encryption active).
+   * Pass-through if no DEK or content is not encrypted.
+   */
+  private decryptContent(content: string): string {
+    if (!this.dek) return content;
+    return decrypt(content, this.dek);
+  }
 
   /**
    * Remove all pendingForms entries for a given session.
