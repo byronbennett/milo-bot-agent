@@ -807,26 +807,38 @@ export class Orchestrator {
         this.publishEvent(sessionId, event.message);
         break;
 
-      case 'WORKER_FILE_SEND':
+      case 'WORKER_FILE_SEND': {
+        const fileContent = `Sent file: ${event.filename}`;
+        const fileData = {
+          filename: event.filename,
+          content: event.content,
+          encoding: event.encoding,
+          mimeType: event.mimeType,
+          sizeBytes: event.sizeBytes,
+        };
+
+        // 1. Publish to PubNub for instant display (uses fileContents)
         if (this.pubnubAdapter?.isConnected) {
           this.pubnubAdapter.publishEvent({
             type: 'file_send',
             agentId: this.agentId,
             sessionId,
-            content: `Sent file: ${event.filename}`,
-            fileContents: {
-              filename: event.filename,
-              content: event.content,
-              encoding: event.encoding,
-              mimeType: event.mimeType,
-              sizeBytes: event.sizeBytes,
-            },
+            content: fileContent,
+            fileContents: fileData,
             timestamp: new Date().toISOString(),
           }).catch((err) => {
             this.logger.warn('PubNub file_send publish failed:', err);
           });
         }
+
+        // 2. Enqueue REST persistence (uses fileData)
+        enqueueOutbox(this.db, 'send_message', {
+          sessionId,
+          content: fileContent,
+          fileData,
+        }, sessionId);
         break;
+      }
 
       case 'WORKER_STREAM_TEXT':
         // Real-time text streaming — publish to user via PubNub (if enabled)
@@ -1095,7 +1107,7 @@ export class Orchestrator {
             await this.restAdapter.acknowledgeMessages(payload.messageIds);
             break;
           case 'send_message':
-            await this.restAdapter.sendMessage(payload.content, payload.sessionId, payload.formData);
+            await this.restAdapter.sendMessage(payload.content, payload.sessionId, payload.formData, payload.fileData);
             break;
           default:
             this.logger.warn(`Unknown outbox event type: ${item.event_type}`);
