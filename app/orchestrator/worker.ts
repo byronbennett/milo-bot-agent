@@ -44,6 +44,9 @@ let agent: import('@mariozechner/pi-agent-core').Agent | null = null;
 /** Store model's context window for reporting */
 let modelContextWindow = 200_000; // default, updated on agent creation
 
+/** Summary from last compact — injected into system prompt on agent recreation */
+let compactedSummary: string | null = null;
+
 // Pending answers for tool safety questions
 const pendingAnswers = new Map<string, (answer: string) => void>();
 
@@ -181,7 +184,12 @@ When asked to research something (find YouTube channels, compare options, gather
     }
   }
 
-  const systemPrompt = sections.join('\n\n');
+  let systemPrompt = sections.join('\n\n');
+
+  // Inject compacted summary from previous context if available
+  if (compactedSummary) {
+    systemPrompt += `\n\n## Prior Context (Compacted Summary)\n${compactedSummary}`;
+  }
 
   // Resolve model
   const provider = initConfig.agentProvider ?? 'anthropic';
@@ -607,6 +615,61 @@ async function main(): Promise<void> {
           if (pending.timeout) clearTimeout(pending.timeout);
           pendingForms.delete(msg.formId);
           pending.resolve(msg.response);
+        }
+        break;
+      }
+      case 'WORKER_CLEAR_CONTEXT': {
+        log('Clear context requested');
+        compactedSummary = null;
+        agent = null;
+        send({ type: 'WORKER_CONTEXT_CLEARED', sessionId, contextSize: getContextSize() });
+        break;
+      }
+      case 'WORKER_COMPACT_CONTEXT': {
+        log('Compact context requested');
+        if (!agent || !agent.state.messages || agent.state.messages.length === 0) {
+          log('No messages to compact');
+          send({ type: 'WORKER_CONTEXT_COMPACTED', sessionId, summary: '', contextSize: getContextSize() });
+          break;
+        }
+
+        try {
+          const { complete, isAIAvailable } = await import('../utils/ai-client.js');
+          if (!isAIAvailable()) {
+            log('AI not available for compaction');
+            send({
+              type: 'WORKER_ERROR',
+              sessionId,
+              error: 'AI utility model not available for memory compaction',
+              fatal: false,
+            });
+            break;
+          }
+
+          // Build conversation text for summarization
+          const conversationText = agent.state.messages
+            .filter((m: any) => 'role' in m && ['user', 'assistant'].includes(m.role))
+            .map((m: any) => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
+            .join('\n\n');
+
+          const summary = await complete(conversationText, {
+            system: 'Summarize this conversation into a concise context paragraph (max 500 words). Preserve: key decisions made, current task state, file paths and code details mentioned, any constraints or preferences the user specified. Write in third person as a factual summary, not as a conversation.',
+          });
+
+          compactedSummary = summary;
+          agent = null;
+          const contextSize = getContextSize();
+
+          send({ type: 'WORKER_CONTEXT_COMPACTED', sessionId, summary, contextSize });
+          log(`Context compacted: ${summary.length} chars summary`);
+        } catch (err) {
+          log(`Compact failed: ${err}`);
+          send({
+            type: 'WORKER_ERROR',
+            sessionId,
+            error: `Memory compaction failed: ${err instanceof Error ? err.message : String(err)}`,
+            fatal: false,
+          });
         }
         break;
       }
