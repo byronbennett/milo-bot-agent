@@ -693,7 +693,7 @@ export class Orchestrator {
     }
 
     // Enqueue work item
-    const isControl = ['CANCEL', 'CLOSE_SESSION', 'STATUS_REQUEST', 'LIST_MODELS'].includes(workItemType);
+    const isControl = ['CANCEL', 'CLOSE_SESSION', 'STATUS_REQUEST', 'LIST_MODELS', 'CLEAR_MEMORY', 'COMPACT_MEMORY'].includes(workItemType);
     const workItem: WorkItem = {
       id: `wi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: workItemType,
@@ -722,6 +722,8 @@ export class Orchestrator {
     if (action === 'CLOSE_SESSION') return 'CLOSE_SESSION';
     if (action === 'STATUS_REQUEST') return 'STATUS_REQUEST';
     if (action === 'LIST_MODELS') return 'LIST_MODELS';
+    if (action === 'CLEAR_MEMORY') return 'CLEAR_MEMORY';
+    if (action === 'COMPACT_MEMORY') return 'COMPACT_MEMORY';
 
     // Text pattern matching fallback
     const lower = message.content.toLowerCase().trim();
@@ -758,7 +760,22 @@ export class Orchestrator {
         const content = event.success
           ? event.output ?? 'Task completed.'
           : `Error: ${event.error ?? 'Unknown error'}`;
-        this.publishEvent(sessionId, content);
+
+        // Publish to user (with context size if available)
+        if (event.contextSize && this.pubnubAdapter?.isConnected) {
+          this.pubnubAdapter.publishEvent({
+            type: 'agent_message',
+            agentId: this.agentId,
+            sessionId,
+            content,
+            contextSize: event.contextSize,
+            timestamp: new Date().toISOString(),
+          }).catch((err) => {
+            this.logger.warn('PubNub publish failed:', err);
+          });
+        } else {
+          this.publishEvent(sessionId, content);
+        }
 
         // Update session status in DB
         updateSessionStatus(this.db, sessionId, 'OPEN_IDLE');
@@ -800,7 +817,16 @@ export class Orchestrator {
         break;
 
       case 'WORKER_READY':
-        // No-op for publishing; actor manager handles dispatch
+        if (event.contextSize && this.pubnubAdapter?.isConnected) {
+          this.pubnubAdapter.publishEvent({
+            type: 'agent_message',
+            agentId: this.agentId,
+            sessionId,
+            content: '',
+            contextSize: event.contextSize,
+            timestamp: new Date().toISOString(),
+          }).catch(() => {});
+        }
         break;
 
       case 'WORKER_PROGRESS':
@@ -836,6 +862,57 @@ export class Orchestrator {
           sessionId,
           content: fileContent,
           fileData,
+        }, sessionId);
+        break;
+      }
+
+      case 'WORKER_CONTEXT_CLEARED': {
+        const content = 'Memory cleared. Starting fresh.';
+        insertSessionMessage(this.db, sessionId, 'system', content);
+
+        if (this.pubnubAdapter?.isConnected) {
+          this.pubnubAdapter.publishEvent({
+            type: 'context_cleared',
+            agentId: this.agentId,
+            sessionId,
+            content,
+            contextSize: event.contextSize,
+            timestamp: new Date().toISOString(),
+          }).catch((err) => {
+            this.logger.warn('PubNub context_cleared publish failed:', err);
+          });
+        }
+
+        enqueueOutbox(this.db, 'send_message', {
+          sessionId,
+          content,
+        }, sessionId);
+        break;
+      }
+
+      case 'WORKER_CONTEXT_COMPACTED': {
+        const content = event.summary
+          ? `Memory compacted. Key context preserved:\n${event.summary}`
+          : 'Memory compacted (no conversation to summarize).';
+        insertSessionMessage(this.db, sessionId, 'system', content);
+
+        if (this.pubnubAdapter?.isConnected) {
+          this.pubnubAdapter.publishEvent({
+            type: 'context_compacted',
+            agentId: this.agentId,
+            sessionId,
+            content,
+            summary: event.summary,
+            contextSize: event.contextSize,
+            timestamp: new Date().toISOString(),
+          }).catch((err) => {
+            this.logger.warn('PubNub context_compacted publish failed:', err);
+          });
+        }
+
+        enqueueOutbox(this.db, 'send_message', {
+          sessionId,
+          content,
         }, sessionId);
         break;
       }
