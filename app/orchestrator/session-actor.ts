@@ -412,6 +412,11 @@ export class SessionActorManager {
       case 'WORKER_QUESTION':
         actor.status = 'OPEN_WAITING_USER';
         break;
+
+      case 'WORKER_CONTEXT_CLEARED':
+      case 'WORKER_CONTEXT_COMPACTED':
+        // Forward to orchestrator — no state change needed in actor
+        break;
     }
 
     // Forward all events to orchestrator for publishing/persistence
@@ -461,6 +466,22 @@ export class SessionActorManager {
     }
     if (item.type === 'LIST_MODELS') {
       // Handled by orchestrator before reaching here, but short-circuit if it does
+      this.tryDispatch(actor);
+      return;
+    }
+    if (item.type === 'CLEAR_MEMORY') {
+      this.sendToWorker(actor, {
+        type: 'WORKER_CLEAR_CONTEXT',
+        sessionId: actor.sessionId,
+      });
+      this.tryDispatch(actor);
+      return;
+    }
+    if (item.type === 'COMPACT_MEMORY') {
+      this.sendToWorker(actor, {
+        type: 'WORKER_COMPACT_CONTEXT',
+        sessionId: actor.sessionId,
+      });
       this.tryDispatch(actor);
       return;
     }
