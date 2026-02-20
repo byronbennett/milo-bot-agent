@@ -54,6 +54,8 @@ export type PubNubEventType =
   | 'tool_use'
   | 'form_request'
   | 'file_send'
+  | 'context_cleared'
+  | 'context_compacted'
   | 'error';
 
 export interface PubNubEventMessage {
@@ -66,9 +68,12 @@ export interface PubNubEventMessage {
   sessionName?: string;
   sessionType?: 'chat' | 'bot';
   contextSize?: {
-    usedTokens: number;
+    systemPromptTokens: number;
+    conversationTokens: number;
     maxTokens: number;
   };
+  /** Summary text for context_compacted events */
+  summary?: string;
   /** The message_id this receipt acknowledges (for message_received) */
   receivedMessageId?: string;
   /** Whether the message was queued for processing */

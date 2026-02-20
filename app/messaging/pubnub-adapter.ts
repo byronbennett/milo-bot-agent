@@ -437,7 +437,7 @@ export class PubNubAdapter implements MessagingAdapter {
   async sendMessageWithContext(
     content: string,
     sessionId: string,
-    contextSize?: { usedTokens: number; maxTokens: number }
+    contextSize?: { systemPromptTokens: number; conversationTokens: number; maxTokens: number }
   ): Promise<void> {
     // Persist to DB
     if (!this.pubsubOnly) {

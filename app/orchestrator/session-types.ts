@@ -19,7 +19,9 @@ export type WorkItemType =
   | 'CANCEL'
   | 'CLOSE_SESSION'
   | 'STATUS_REQUEST'
-  | 'LIST_MODELS';
+  | 'LIST_MODELS'
+  | 'CLEAR_MEMORY'
+  | 'COMPACT_MEMORY';
 
 export interface WorkItem {
   id: string;

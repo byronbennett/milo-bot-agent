@@ -3,6 +3,13 @@
  * Communication is JSON Lines over stdin/stdout.
  */
 
+/** Context size breakdown for reporting to browser */
+export interface ContextSize {
+  systemPromptTokens: number;
+  conversationTokens: number;
+  maxTokens: number;
+}
+
 // --- Orchestrator → Worker ---
 
 export interface WorkerInitMessage {
@@ -72,6 +79,16 @@ export interface WorkerFormResponseMessage {
   response: import('../shared/form-types.js').FormResponseSubmitted | import('../shared/form-types.js').FormResponseCancelled;
 }
 
+export interface WorkerClearContextMessage {
+  type: 'WORKER_CLEAR_CONTEXT';
+  sessionId: string;
+}
+
+export interface WorkerCompactContextMessage {
+  type: 'WORKER_COMPACT_CONTEXT';
+  sessionId: string;
+}
+
 export type OrchestratorToWorker =
   | WorkerInitMessage
   | WorkerTaskMessage
@@ -79,7 +96,9 @@ export type OrchestratorToWorker =
   | WorkerCloseMessage
   | WorkerSteerMessage
   | WorkerAnswerMessage
-  | WorkerFormResponseMessage;
+  | WorkerFormResponseMessage
+  | WorkerClearContextMessage
+  | WorkerCompactContextMessage;
 
 // --- Worker → Orchestrator ---
 
@@ -87,6 +106,7 @@ export interface WorkerReadyMessage {
   type: 'WORKER_READY';
   sessionId: string;
   pid: number;
+  contextSize?: ContextSize;
 }
 
 export interface WorkerTaskStartedMessage {
@@ -104,6 +124,7 @@ export interface WorkerTaskDoneMessage {
   error?: string;
   costUsd?: number;
   durationMs?: number;
+  contextSize?: ContextSize;
 }
 
 export interface WorkerTaskCancelledMessage {
@@ -186,6 +207,19 @@ export interface WorkerProjectSetMessage {
   isNew: boolean;
 }
 
+export interface WorkerContextClearedMessage {
+  type: 'WORKER_CONTEXT_CLEARED';
+  sessionId: string;
+  contextSize: ContextSize;
+}
+
+export interface WorkerContextCompactedMessage {
+  type: 'WORKER_CONTEXT_COMPACTED';
+  sessionId: string;
+  summary: string;
+  contextSize: ContextSize;
+}
+
 export type WorkerToOrchestrator =
   | WorkerReadyMessage
   | WorkerTaskStartedMessage
@@ -199,7 +233,9 @@ export type WorkerToOrchestrator =
   | WorkerToolEndMessage
   | WorkerQuestionMessage
   | WorkerFormRequestMessage
-  | WorkerProjectSetMessage;
+  | WorkerProjectSetMessage
+  | WorkerContextClearedMessage
+  | WorkerContextCompactedMessage;
 
 // Union of all IPC messages
 export type IPCMessage = OrchestratorToWorker | WorkerToOrchestrator;
