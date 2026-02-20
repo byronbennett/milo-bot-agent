@@ -113,7 +113,14 @@ export function createSendFileTool(deps: SendFileToolDeps): AgentTool<typeof Sen
       }
 
       // Validate extension
-      const ext = extname(filePath).toLowerCase();
+      let ext = extname(filePath).toLowerCase();
+      if (!ext) {
+        // Dotfiles like .gitignore have no extname — use the basename itself
+        const name = basename(filePath).toLowerCase();
+        if (name.startsWith('.') && TEXT_EXTENSIONS.has(name)) {
+          ext = name;
+        }
+      }
       if (!ext || !TEXT_EXTENSIONS.has(ext)) {
         const supported = [...TEXT_EXTENSIONS].sort().join(', ');
         return {

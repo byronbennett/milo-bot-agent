@@ -85,7 +85,7 @@ describe('execute', () => {
 
   it('rejects files exceeding size limit', async () => {
     const filePath = join(testDir, 'big.txt');
-    writeFileSync(filePath, 'x'.repeat(21000));
+    writeFileSync(filePath, 'x'.repeat(MAX_FILE_SIZE + 1));
 
     const tool = createSendFileTool({ sendFile: () => {} });
     const result = await tool.execute('call-1', { filePath });
