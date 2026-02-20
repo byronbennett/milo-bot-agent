@@ -2,6 +2,7 @@ import { createSendFileTool, TEXT_EXTENSIONS, MAX_FILE_SIZE, getMimeType } from 
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { gunzipSync } from 'node:zlib';
 
 const testDir = join(tmpdir(), 'send-file-tool-test');
 
@@ -55,7 +56,7 @@ describe('getMimeType', () => {
 });
 
 describe('execute', () => {
-  it('sends file contents via sendFile callback', async () => {
+  it('sends gzip+base64 encoded file contents via sendFile callback', async () => {
     const filePath = join(testDir, 'test.txt');
     writeFileSync(filePath, 'Hello, world!');
 
@@ -68,10 +69,14 @@ describe('execute', () => {
     expect(result.content[0].text).toContain('Sent');
     expect(captured).not.toBeNull();
     expect(captured.filename).toBe('test.txt');
-    expect(captured.content).toBe('Hello, world!');
-    expect(captured.encoding).toBe('utf-8');
+    expect(captured.encoding).toBe('gzip+base64');
     expect(captured.mimeType).toBe('text/plain');
     expect(captured.sizeBytes).toBe(13);
+
+    // Verify content round-trips: base64 → gunzip → original text
+    const compressed = Buffer.from(captured.content, 'base64');
+    const decompressed = gunzipSync(compressed).toString('utf-8');
+    expect(decompressed).toBe('Hello, world!');
   });
 
   it('rejects non-text file extensions', async () => {

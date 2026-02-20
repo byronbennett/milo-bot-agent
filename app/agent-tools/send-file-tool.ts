@@ -2,6 +2,7 @@ import { Type } from '@mariozechner/pi-ai';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { readFileSync, existsSync, statSync } from 'fs';
 import { basename, extname } from 'path';
+import { gzipSync } from 'node:zlib';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,7 +12,7 @@ export interface SendFileToolDeps {
   sendFile: (opts: {
     filename: string;
     content: string;
-    encoding: 'utf-8' | 'base64';
+    encoding: 'utf-8' | 'base64' | 'gzip+base64';
     mimeType: string;
     sizeBytes: number;
   }) => void;
@@ -21,8 +22,8 @@ export interface SendFileToolDeps {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Maximum file size in bytes (20KB — leaves room for base64 + JSON envelope within PubNub 32KB limit) */
-export const MAX_FILE_SIZE = 20 * 1024;
+/** Maximum file size in bytes (30KB — gzip compression typically reduces text 70-90%, leaving room within PubNub 32KB limit) */
+export const MAX_FILE_SIZE = 30 * 1024;
 
 /** Allowed text file extensions */
 export const TEXT_EXTENSIONS = new Set([
@@ -99,7 +100,7 @@ export function createSendFileTool(deps: SendFileToolDeps): AgentTool<typeof Sen
     description:
       'Send the contents of a text file to the user. ' +
       'Supports common text formats: source code, config files, JSON, XML, HTML, CSV, Markdown, etc. ' +
-      'Maximum file size: 20KB. Binary files are not supported.',
+      'Maximum file size: 30KB. Binary files are not supported.',
     parameters: SendFileParams,
     execute: async (_toolCallId, params) => {
       const { filePath } = params;
@@ -140,25 +141,11 @@ export function createSendFileTool(deps: SendFileToolDeps): AgentTool<typeof Sen
         };
       }
 
-      // Read and encode
+      // Read, gzip compress, and base64 encode
       const buffer = readFileSync(filePath);
-      let content: string;
-      let encoding: 'utf-8' | 'base64';
-
-      try {
-        // Try UTF-8 decode — check for replacement characters indicating invalid UTF-8
-        const text = buffer.toString('utf-8');
-        if (text.includes('\uFFFD')) {
-          content = buffer.toString('base64');
-          encoding = 'base64';
-        } else {
-          content = text;
-          encoding = 'utf-8';
-        }
-      } catch {
-        content = buffer.toString('base64');
-        encoding = 'base64';
-      }
+      const compressed = gzipSync(buffer);
+      const content = compressed.toString('base64');
+      const encoding = 'gzip+base64' as const;
 
       const filename = basename(filePath);
       const mimeType = getMimeType(ext);

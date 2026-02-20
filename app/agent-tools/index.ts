@@ -45,7 +45,7 @@ export interface ToolContext {
   sendFile?: (opts: {
     filename: string;
     content: string;
-    encoding: 'utf-8' | 'base64';
+    encoding: 'utf-8' | 'base64' | 'gzip+base64';
     mimeType: string;
     sizeBytes: number;
   }) => void;
