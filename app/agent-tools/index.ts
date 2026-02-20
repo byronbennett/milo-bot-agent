@@ -13,6 +13,7 @@ import { createWebFetchTool } from './web-fetch-tool.js';
 import { createSetProjectTool } from './project-tool.js';
 import { createFormTool, type FormToolContext } from './form-tool.js';
 import { createUsageTool } from './usage-tool.js';
+import { createSendFileTool } from './send-file-tool.js';
 import { loadToolKey } from '../utils/keychain.js';
 
 export { isDangerousCommand } from './bash-tool.js';
@@ -75,19 +76,22 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
   const usageTools = ctx.requestForm
     ? [createUsageTool({ loadAdminKey: (name) => loadToolKey('usage', name), requestForm: ctx.requestForm })]
     : [];
+  const sendFileTools = ctx.sendFile
+    ? [createSendFileTool({ sendFile: ctx.sendFile })]
+    : [];
 
   switch (toolSet) {
     case 'full':
-      return [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, uiTools[0], createBrowserTool(), ...formTools, ...usageTools];
+      return [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, uiTools[0], createBrowserTool(), ...formTools, ...usageTools, ...sendFileTools];
     case 'chat':
       return [...uiTools];
     case 'minimal':
-      return [...coreTools, createWebFetchTool(), setProjectTool, ...uiTools, ...formTools, ...usageTools];
+      return [...coreTools, createWebFetchTool(), setProjectTool, ...uiTools, ...formTools, ...usageTools, ...sendFileTools];
     default:
       if (Array.isArray(toolSet)) {
-        const all = [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, ...uiTools, createBrowserTool(), ...formTools, ...usageTools];
+        const all = [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, ...uiTools, createBrowserTool(), ...formTools, ...usageTools, ...sendFileTools];
         return all.filter((t) => toolSet.includes(t.name));
       }
-      return [...coreTools, createWebFetchTool(), ...uiTools, ...formTools, ...usageTools];
+      return [...coreTools, createWebFetchTool(), ...uiTools, ...formTools, ...usageTools, ...sendFileTools];
   }
 }

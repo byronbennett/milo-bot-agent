@@ -56,6 +56,32 @@ describe('loadTools', () => {
     expect(names).toContain('check_usage');
   });
 
+  it('full set includes send_file when sendFile is provided', () => {
+    const ctxWithSendFile = {
+      ...ctx,
+      sendFile: () => {},
+    };
+    const tools = loadTools('full', ctxWithSendFile);
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('send_file');
+  });
+
+  it('minimal set includes send_file when sendFile is provided', () => {
+    const ctxWithSendFile = {
+      ...ctx,
+      sendFile: () => {},
+    };
+    const tools = loadTools('minimal', ctxWithSendFile);
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('send_file');
+  });
+
+  it('send_file is not included when sendFile is not provided', () => {
+    const tools = loadTools('full', ctx);
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('send_file');
+  });
+
   it('codex_cli tool has correct parameter schema', () => {
     const tools = loadTools('full', ctx);
     const codexTool = tools.find((t) => t.name === 'codex_cli');
