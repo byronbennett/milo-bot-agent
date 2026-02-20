@@ -19,6 +19,7 @@ const ACCOUNT_MILO_KEY = 'api-key';
 const ACCOUNT_ANTHROPIC_KEY = 'anthropic-api-key';
 const ACCOUNT_OPENAI_KEY = 'openai-api-key';
 const ACCOUNT_GEMINI_KEY = 'gemini-api-key';
+const ACCOUNT_ENCRYPTION_PASSWORD = 'encryption-password';
 
 /** Per-account in-memory cache so repeated loads don't spawn subprocesses */
 const cache = new Map<string, string | null>();
@@ -317,6 +318,22 @@ export async function loadGeminiKey(): Promise<string | null> {
 
 export async function deleteGeminiKey(): Promise<void> {
   return deleteCredential(ACCOUNT_GEMINI_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// ENCRYPTION_PASSWORD helpers
+// ---------------------------------------------------------------------------
+
+export async function saveEncryptionPassword(key: string): Promise<void> {
+  return saveCredential(ACCOUNT_ENCRYPTION_PASSWORD, key);
+}
+
+export async function loadEncryptionPassword(): Promise<string | null> {
+  return loadCredential(ACCOUNT_ENCRYPTION_PASSWORD);
+}
+
+export async function deleteEncryptionPassword(): Promise<void> {
+  return deleteCredential(ACCOUNT_ENCRYPTION_PASSWORD);
 }
 
 // ---------------------------------------------------------------------------

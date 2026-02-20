@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { input, confirm, select } from '@inquirer/prompts';
+import { input, confirm, select, password } from '@inquirer/prompts';
 import open from 'open';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, copyFileSync, statSync } from 'fs';
 import { resolve, join, dirname } from 'path';
@@ -11,8 +11,16 @@ import {
   saveAnthropicKey, loadAnthropicKey, deleteAnthropicKey,
   saveOpenAIKey, loadOpenAIKey, deleteOpenAIKey,
   saveGeminiKey, loadGeminiKey, deleteGeminiKey,
+  saveEncryptionPassword,
   isKeychainAvailable,
 } from '../utils/keychain';
+import {
+  generateSalt,
+  deriveKey,
+  generateDEK,
+  wrapDEK,
+  computeVerifier,
+} from '../crypto/encryption';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -707,6 +715,93 @@ export async function runInit(options: {
     }
 
     // -----------------------------------------------------------------------
+    // Encryption setup
+    // -----------------------------------------------------------------------
+    let encryptionLevel = 1;
+    let encryptionSalt: string | undefined;
+    let encryptionWrappedDEK: string | undefined;
+    let encryptionWrappedDEKIV: string | undefined;
+    let encryptionVerifier: string | undefined;
+    let encryptionPasswordValue: string | undefined;
+
+    if (isInteractive) {
+      console.log('');
+      console.log('🔒 Message Encryption');
+      console.log('   Control how messages between you and the agent are protected.');
+      console.log('');
+
+      encryptionLevel = await select({
+        message: 'Choose an encryption level:',
+        choices: [
+          { name: 'None — messages stored in plaintext', value: 1 },
+          { name: 'Server-Managed — password stored securely on server', value: 2 },
+          { name: 'End-to-End — zero-knowledge, password never leaves your machine', value: 3 },
+        ],
+        default: 1,
+      });
+
+      if (encryptionLevel >= 2) {
+        console.log('');
+        const encPassword = await password({
+          message: 'Enter an encryption password:',
+          mask: '*',
+        });
+
+        const encPasswordConfirm = await password({
+          message: 'Confirm encryption password:',
+          mask: '*',
+        });
+
+        if (encPassword !== encPasswordConfirm) {
+          logger.error('Passwords do not match. Aborting setup.');
+          process.exit(1);
+        }
+
+        if (encryptionLevel === 3) {
+          console.log('');
+          console.log('   ⚠️  End-to-End encryption means your password NEVER leaves this');
+          console.log('   machine. If you lose it, your encrypted messages CANNOT be recovered.');
+          console.log('');
+          const e2eConfirm = await confirm({
+            message: 'I understand there is no password recovery. Continue?',
+            default: false,
+          });
+          if (!e2eConfirm) {
+            console.log('Encryption setup cancelled. Falling back to no encryption.');
+            encryptionLevel = 1;
+          }
+        }
+
+        // Generate crypto materials if still level 2 or 3
+        if (encryptionLevel >= 2) {
+          encryptionPasswordValue = encPassword;
+          const salt = generateSalt();
+          const masterKey = deriveKey(encPassword, salt);
+          const dek = generateDEK();
+          const { wrapped, iv } = wrapDEK(dek, masterKey);
+
+          encryptionSalt = salt.toString('base64');
+          encryptionWrappedDEK = wrapped;
+          encryptionWrappedDEKIV = iv;
+          encryptionVerifier = computeVerifier(masterKey);
+
+          // Save password to keychain
+          try {
+            await saveSecret({
+              key: encPassword,
+              save: saveEncryptionPassword,
+              envName: 'MILO_ENCRYPTION_PASSWORD',
+              resolvedDir,
+              label: 'Encryption password',
+            });
+          } catch (err) {
+            logger.warn(`Failed to save encryption password: ${err}`);
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // Create workspace
     // -----------------------------------------------------------------------
     console.log('');
@@ -875,6 +970,14 @@ dist/
       ai: {
         model: aiModel,
       },
+      encryption: {
+        level: encryptionLevel,
+        ...(encryptionSalt && {
+          salt: encryptionSalt,
+          wrappedDEK: encryptionWrappedDEK,
+          wrappedDEKIV: encryptionWrappedDEKIV,
+        }),
+      },
       messaging: {
         activeAdapter: 'webapp',
         webapp: {
@@ -940,6 +1043,35 @@ dist/
 
     // Write config
     writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    // Sync encryption settings to server
+    if (encryptionLevel > 1 && apiKey) {
+      try {
+        const response = await fetch(`${serverUrl}/api/agent/encryption`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            level: encryptionLevel,
+            salt: encryptionSalt,
+            verifier: encryptionVerifier,
+            wrappedDEK: encryptionWrappedDEK,
+            wrappedDEKIV: encryptionWrappedDEKIV,
+            ...(encryptionLevel === 2 && { password: encryptionPasswordValue }),
+          }),
+        });
+        if (response.ok) {
+          console.log('🔒 Encryption settings synced to server');
+        } else {
+          const body = await response.text();
+          logger.warn(`Failed to sync encryption settings: ${response.status} ${body}`);
+        }
+      } catch (err) {
+        logger.warn(`Failed to sync encryption settings: ${err}`);
+      }
+    }
 
     if (isReinit) {
       console.log('✅ Workspace updated successfully!');
