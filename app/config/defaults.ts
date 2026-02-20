@@ -80,6 +80,9 @@ export const defaultConfig: AgentConfig = {
   },
   streaming: false,
   onboardingComplete: false,
+  encryption: {
+    level: 1,
+  },
 };
 
 /**

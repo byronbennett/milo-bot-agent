@@ -92,6 +92,13 @@ export const localModelsConfigSchema = z.object({
   timeoutMs: z.number().default(2000),
 });
 
+export const encryptionConfigSchema = z.object({
+  level: z.number().min(1).max(3).default(1),
+  salt: z.string().optional(),
+  wrappedDEK: z.string().optional(),
+  wrappedDEKIV: z.string().optional(),
+});
+
 export const agentConfigSchema = z.object({
   agentName: z.string().min(1).max(100),
   agentId: z.string().optional(),
@@ -111,6 +118,7 @@ export const agentConfigSchema = z.object({
   localModels: localModelsConfigSchema.default({}),
   streaming: z.boolean().default(false),
   onboardingComplete: z.boolean().default(false),
+  encryption: encryptionConfigSchema.default({ level: 1 }),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
@@ -123,3 +131,4 @@ export type AIConfig = z.infer<typeof aiConfigSchema>;
 export type MessagingConfig = z.infer<typeof messagingConfigSchema>;
 export type UpdateConfig = z.infer<typeof updateConfigSchema>;
 export type LocalModelsConfig = z.infer<typeof localModelsConfigSchema>;
+export type EncryptionConfig = z.infer<typeof encryptionConfigSchema>;
