@@ -181,6 +181,14 @@ When asked to research something (find YouTube channels, compare options, gather
         message,
       });
     },
+    sendFile: (opts) => {
+      send({
+        type: 'WORKER_FILE_SEND',
+        taskId: currentTaskId ?? '',
+        sessionId,
+        ...opts,
+      });
+    },
     askUser: ({ toolCallId, question, options }) => {
       return new Promise<string>((resolve) => {
         pendingAnswers.set(toolCallId, resolve);

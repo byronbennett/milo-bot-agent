@@ -807,6 +807,27 @@ export class Orchestrator {
         this.publishEvent(sessionId, event.message);
         break;
 
+      case 'WORKER_FILE_SEND':
+        if (this.pubnubAdapter?.isConnected) {
+          this.pubnubAdapter.publishEvent({
+            type: 'file_send',
+            agentId: this.agentId,
+            sessionId,
+            content: `Sent file: ${event.filename}`,
+            fileContents: {
+              filename: event.filename,
+              content: event.content,
+              encoding: event.encoding,
+              mimeType: event.mimeType,
+              sizeBytes: event.sizeBytes,
+            },
+            timestamp: new Date().toISOString(),
+          }).catch((err) => {
+            this.logger.warn('PubNub file_send publish failed:', err);
+          });
+        }
+        break;
+
       case 'WORKER_STREAM_TEXT':
         // Real-time text streaming — publish to user via PubNub (if enabled)
         if (this.config.streaming) {

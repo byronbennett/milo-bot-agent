@@ -126,6 +126,17 @@ export interface WorkerProgressMessage {
   message: string;
 }
 
+export interface WorkerFileSendMessage {
+  type: 'WORKER_FILE_SEND';
+  taskId: string;
+  sessionId: string;
+  filename: string;
+  content: string;
+  encoding: 'utf-8' | 'base64';
+  mimeType: string;
+  sizeBytes: number;
+}
+
 export interface WorkerStreamTextMessage {
   type: 'WORKER_STREAM_TEXT';
   sessionId: string;
@@ -182,6 +193,7 @@ export type WorkerToOrchestrator =
   | WorkerTaskCancelledMessage
   | WorkerErrorMessage
   | WorkerProgressMessage
+  | WorkerFileSendMessage
   | WorkerStreamTextMessage
   | WorkerToolStartMessage
   | WorkerToolEndMessage

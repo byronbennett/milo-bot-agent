@@ -53,6 +53,7 @@ export type PubNubEventType =
   | 'ui_action_result'
   | 'tool_use'
   | 'form_request'
+  | 'file_send'
   | 'error';
 
 export interface PubNubEventMessage {
@@ -99,6 +100,14 @@ export interface PubNubEventMessage {
   skillError?: string | null;
   /** Form definition for form_request events */
   formDefinition?: import('../shared/form-types.js').FormDefinition;
+  /** File contents for file_send events */
+  fileContents?: {
+    filename: string;
+    content: string;
+    encoding: 'utf-8' | 'base64';
+    mimeType: string;
+    sizeBytes: number;
+  };
   timestamp: string;
 }
 

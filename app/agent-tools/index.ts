@@ -41,6 +41,13 @@ export interface ToolContext {
     success?: boolean;
     summary?: string;
   }) => void;
+  sendFile?: (opts: {
+    filename: string;
+    content: string;
+    encoding: 'utf-8' | 'base64';
+    mimeType: string;
+    sizeBytes: number;
+  }) => void;
   requestForm?: FormToolContext['requestForm'];
   onProjectSet?: (projectName: string, projectPath: string, isNew: boolean) => void;
 }
