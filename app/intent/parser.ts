@@ -9,6 +9,7 @@ import type { PendingMessage, ParsedIntent, AgentConfig } from '../shared';
 import {
   matchOpenSessionPatterns,
   matchGreetingPatterns,
+  matchListProjectsPatterns,
   resolveProjectAlias,
   generateSessionName,
   looksLikeTask,
@@ -38,6 +39,16 @@ export function parseIntent(
       sessionName: message.sessionName ?? undefined,
       taskDescription: content,
       confidence: 1.0,
+      raw: content,
+    };
+  }
+
+  // Case 1.5: Check for list_projects command
+  if (matchListProjectsPatterns(content)) {
+    logger.verbose('  Intent: list_projects pattern matched');
+    return {
+      type: 'list_projects',
+      confidence: 0.95,
       raw: content,
     };
   }

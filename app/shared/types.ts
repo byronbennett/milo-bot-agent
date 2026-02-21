@@ -225,6 +225,7 @@ export type IntentType =
   | 'question'
   | 'greeting'
   | 'list_sessions'
+  | 'list_projects'
   | 'cancel_session'
   | 'set_rule'
   | 'unknown';

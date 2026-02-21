@@ -66,5 +66,30 @@ describe('Intent Parser', () => {
         expect(typeof result.sessionName).toBe('string');
       }
     });
+
+    it('parses list_projects intent for "list projects"', () => {
+      const message = createMessage('list projects');
+      const result = parseIntent(message, mockConfig);
+      expect(result.type).toBe('list_projects');
+      expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+    });
+
+    it('parses list_projects intent for "what projects are there"', () => {
+      const message = createMessage('what projects are there');
+      const result = parseIntent(message, mockConfig);
+      expect(result.type).toBe('list_projects');
+    });
+
+    it('parses list_projects intent for "/projects"', () => {
+      const message = createMessage('/projects');
+      const result = parseIntent(message, mockConfig);
+      expect(result.type).toBe('list_projects');
+    });
+
+    it('parses list_projects intent for "show projects"', () => {
+      const message = createMessage('show projects');
+      const result = parseIntent(message, mockConfig);
+      expect(result.type).toBe('list_projects');
+    });
   });
 });

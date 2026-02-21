@@ -162,6 +162,25 @@ export function matchGreetingPatterns(content: string): boolean {
 }
 
 /**
+ * Patterns for listing projects
+ */
+const LIST_PROJECTS_PATTERNS = [
+  /^\/projects$/i,
+  /^(list|show|get)\s+(the\s+)?projects?\s*(list|folders?)?$/i,
+  /^what\s+projects?\s+(are\s+there|do\s+(i|we)\s+have|exist)/i,
+  /^projects?\s*$/i,
+];
+
+/**
+ * Check if content is a list-projects request
+ */
+export function matchListProjectsPatterns(content: string): boolean {
+  const trimmed = content.trim();
+  return LIST_PROJECTS_PATTERNS.some((p) => p.test(trimmed));
+}
+
+
+/**
  * Check if content looks like a task (starts with verb or has task indicators)
  */
 export function looksLikeTask(content: string): boolean {
