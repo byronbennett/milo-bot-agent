@@ -138,7 +138,7 @@ export class SessionActorManager {
 
     // Send WORKER_CLOSE
     if (actor.worker && actor.worker.state !== 'dead') {
-      this.sendToWorker(actor, { type: 'WORKER_CLOSE', reason: 'session closed' });
+      this.sendToWorkerInternal(actor, { type: 'WORKER_CLOSE', reason: 'session closed' });
       // Give it 3s to exit gracefully
       await this.waitForExit(actor.worker.process, 3000);
     }
@@ -165,7 +165,7 @@ export class SessionActorManager {
     actor.currentTask.cancelRequestedAt = new Date();
 
     // Step 1: soft cancel via IPC
-    this.sendToWorker(actor, {
+    this.sendToWorkerInternal(actor, {
       type: 'WORKER_CANCEL',
       taskId: actor.currentTask.taskId,
     });
@@ -219,7 +219,7 @@ export class SessionActorManager {
       this.logger.warn(`Cannot steer session ${sessionId}: not busy`);
       return;
     }
-    this.sendToWorker(actor, { type: 'WORKER_STEER', prompt });
+    this.sendToWorkerInternal(actor, { type: 'WORKER_STEER', prompt });
   }
 
   /**
@@ -231,7 +231,7 @@ export class SessionActorManager {
       this.logger.warn(`Cannot answer for session ${sessionId}: no live worker`);
       return;
     }
-    this.sendToWorker(actor, { type: 'WORKER_ANSWER', toolCallId, answer: answerText });
+    this.sendToWorkerInternal(actor, { type: 'WORKER_ANSWER', toolCallId, answer: answerText });
     if (actor.status === 'OPEN_WAITING_USER') {
       actor.status = 'OPEN_RUNNING';
     }
@@ -246,7 +246,7 @@ export class SessionActorManager {
       this.logger.warn(`Cannot send form response for session ${sessionId}: no live worker`);
       return;
     }
-    this.sendToWorker(actor, message);
+    this.sendToWorkerInternal(actor, message);
     if (actor.status === 'OPEN_INPUT_REQUIRED') {
       actor.status = message.response.status === 'submitted' ? 'OPEN_RUNNING' : 'OPEN_IDLE';
     }
@@ -470,7 +470,7 @@ export class SessionActorManager {
       return;
     }
     if (item.type === 'CLEAR_MEMORY') {
-      this.sendToWorker(actor, {
+      this.sendToWorkerInternal(actor, {
         type: 'WORKER_CLEAR_CONTEXT',
         sessionId: actor.sessionId,
       });
@@ -478,7 +478,7 @@ export class SessionActorManager {
       return;
     }
     if (item.type === 'COMPACT_MEMORY') {
-      this.sendToWorker(actor, {
+      this.sendToWorkerInternal(actor, {
         type: 'WORKER_COMPACT_CONTEXT',
         sessionId: actor.sessionId,
       });
@@ -495,7 +495,7 @@ export class SessionActorManager {
       cancelRequested: false,
     };
 
-    this.sendToWorker(actor, {
+    this.sendToWorkerInternal(actor, {
       type: 'WORKER_TASK',
       taskId,
       userEventId: item.eventId,
@@ -506,7 +506,19 @@ export class SessionActorManager {
     });
   }
 
-  private sendToWorker(actor: SessionActor, msg: OrchestratorToWorker): void {
+  /**
+   * Send an IPC message to a session's worker (public accessor).
+   */
+  public sendToWorker(sessionId: string, msg: OrchestratorToWorker): void {
+    const actor = this.actors.get(sessionId);
+    if (!actor?.worker || actor.worker.state === 'dead') {
+      this.logger.verbose(`Cannot send to worker for session ${sessionId}: no live worker`);
+      return;
+    }
+    sendIPC(actor.worker.process.stdin!, msg);
+  }
+
+  private sendToWorkerInternal(actor: SessionActor, msg: OrchestratorToWorker): void {
     if (!actor.worker || actor.worker.state === 'dead') {
       this.logger.warn(`Cannot send to dead worker for session ${actor.sessionId}`);
       return;

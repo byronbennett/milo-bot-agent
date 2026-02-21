@@ -12,6 +12,7 @@
  */
 
 import { existsSync, unlinkSync, mkdirSync, readdirSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
@@ -19,6 +20,7 @@ import { WebAppAdapter, PubNubAdapter } from '../messaging/index.js';
 import type { PubNubControlMessage, PubNubSkillCommand, PubNubFormResponseCommand } from '../messaging/pubnub-types.js';
 import { SkillInstaller } from '../skills/skill-installer.js';
 import type { PendingMessage } from '../shared/index.js';
+import type { FormDefinition } from '../shared/form-types.js';
 import { getDb, closeDb } from '../db/index.js';
 import { insertInbox, markProcessed, getUnprocessed } from '../db/inbox.js';
 import { enqueueOutbox, getUnsent, markSent, markFailed } from '../db/outbox.js';
@@ -27,8 +29,10 @@ import {
   updateSessionStatus,
   updateWorkerState,
   updateConfirmedProject,
+  updateConfirmedProjects,
   getActiveSessions,
   getConfirmedProject,
+  getConfirmedProjects,
   insertSessionMessage,
 } from '../db/sessions-db.js';
 import { SessionActorManager } from './session-actor.js';
@@ -335,6 +339,13 @@ export class Orchestrator {
       }
       // Clear pending form
       this.pendingForms.delete(formMsg.formId);
+
+      // Check if this is an orchestrator-owned form
+      if (pending.taskId.startsWith('orchestrator:')) {
+        await this.handleOrchestratorFormResponse(pending, formMsg);
+        return;
+      }
+
       // Forward to worker
       this.actorManager.sendFormResponse(pending.sessionId, {
         type: 'WORKER_FORM_RESPONSE',
@@ -415,6 +426,84 @@ export class Orchestrator {
         skillError: result.error ?? null,
         timestamp: new Date().toISOString(),
       });
+    }
+  }
+
+  /**
+   * Handle form responses for orchestrator-owned forms (not worker forms).
+   */
+  private async handleOrchestratorFormResponse(
+    pending: { formId: string; sessionId: string; taskId: string },
+    formMsg: PubNubFormResponseCommand,
+  ): Promise<void> {
+    const { sessionId } = pending;
+
+    if (pending.taskId === 'orchestrator:set_project') {
+      if (formMsg.status !== 'submitted' || !formMsg.values) {
+        const text = 'Project selection cancelled.';
+        this.publishEvent(sessionId, text);
+        enqueueOutbox(this.db, 'send_message', { sessionId, content: text }, sessionId);
+        return;
+      }
+
+      // Read PROJECTS/ to build name mapping (field names have underscores, folder names may have hyphens)
+      const projectsRoot = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
+      let projectNames: string[] = [];
+      if (existsSync(projectsRoot)) {
+        projectNames = readdirSync(projectsRoot, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+          .map((d) => d.name);
+      }
+
+      // Build reverse mapping: sanitized field name → actual folder name
+      const fieldToFolder = new Map<string, string>();
+      for (const name of projectNames) {
+        fieldToFolder.set(name.replace(/[^a-zA-Z0-9_]/g, '_'), name);
+      }
+
+      // Extract selected projects
+      const selectedProjects: string[] = [];
+      for (const [fieldName, value] of Object.entries(formMsg.values)) {
+        if (value === true) {
+          const folderName = fieldToFolder.get(fieldName);
+          if (folderName) selectedProjects.push(folderName);
+        }
+      }
+
+      if (selectedProjects.length === 0) {
+        const text = 'No projects selected. Tools requiring a project will be blocked until you set one.';
+        this.publishEvent(sessionId, text);
+        enqueueOutbox(this.db, 'send_message', { sessionId, content: text }, sessionId);
+        return;
+      }
+
+      // Update DB
+      updateConfirmedProjects(this.db, sessionId, selectedProjects);
+
+      // Update actor's projectPath to primary (first selected)
+      const primaryPath = join(projectsRoot, selectedProjects[0]);
+      const actor = this.actorManager.get(sessionId);
+      if (actor) {
+        actor.projectPath = primaryPath;
+      }
+
+      // Notify running worker
+      const allPaths = selectedProjects.map((n) => join(projectsRoot, n));
+      this.actorManager.sendToWorker(sessionId, {
+        type: 'WORKER_UPDATE_PROJECTS',
+        sessionId,
+        projectPaths: allPaths,
+        primaryProjectPath: primaryPath,
+      });
+
+      // Confirm to user
+      const projectList = selectedProjects.join(', ');
+      const text = selectedProjects.length === 1
+        ? `Project set: **${selectedProjects[0]}**`
+        : `Projects set: **${projectList}**`;
+      this.publishEvent(sessionId, text);
+      enqueueOutbox(this.db, 'send_message', { sessionId, content: text }, sessionId);
+      this.logger.info(`Set projects [${projectList}] for session ${sessionId}`);
     }
   }
 
@@ -707,6 +796,71 @@ export class Orchestrator {
       enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: text }, message.sessionId);
       return;
     }
+    // SET_PROJECT doesn't need a worker — orchestrator sends form and handles response
+    if (workItemType === 'SET_PROJECT') {
+      const projectsRoot = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
+      let projectNames: string[] = [];
+      if (existsSync(projectsRoot)) {
+        projectNames = readdirSync(projectsRoot, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+          .map((d) => d.name)
+          .sort();
+      }
+
+      if (projectNames.length === 0) {
+        const text = 'No projects found in PROJECTS/. Create a project folder first.';
+        this.publishEvent(message.sessionId, text);
+        enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: text }, message.sessionId);
+        return;
+      }
+
+      // Get currently confirmed projects for this session to set defaults
+      const currentProjects = getConfirmedProjects(this.db, message.sessionId);
+
+      const formId = randomUUID();
+      const formDefinition: FormDefinition = {
+        formId,
+        title: 'Select Projects',
+        description: 'Choose which projects this session should have access to.',
+        critical: false,
+        status: 'pending',
+        fields: projectNames.map((name) => ({
+          type: 'checkbox' as const,
+          name: name.replace(/[^a-zA-Z0-9_]/g, '_'),
+          label: name,
+          required: false,
+          defaultValue: currentProjects.includes(name),
+        })),
+        submitLabel: 'Set Projects',
+      };
+
+      // Track with orchestrator prefix so form response handler knows not to forward to worker
+      this.pendingForms.set(formId, {
+        formId,
+        sessionId: message.sessionId,
+        taskId: 'orchestrator:set_project',
+      });
+
+      // Publish form to browser
+      if (this.pubnubAdapter) {
+        this.pubnubAdapter.publishEvent({
+          type: 'form_request',
+          agentId: this.agentId,
+          sessionId: message.sessionId,
+          formDefinition,
+          timestamp: new Date().toISOString(),
+        }).catch((err) => {
+          this.logger.warn('PubNub form_request publish failed:', err);
+        });
+      }
+
+      // Persist form as message
+      const formContent = JSON.stringify(formDefinition);
+      insertSessionMessage(this.db, message.sessionId, 'agent', formContent);
+      enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: formContent, formData: formDefinition }, message.sessionId);
+      return;
+    }
+
     // Determine project path — restore confirmed project if available
     let projectPath = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
     const confirmedProject = getConfirmedProject(this.db, message.sessionId);
