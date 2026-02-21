@@ -20,6 +20,8 @@ export type WorkItemType =
   | 'CLOSE_SESSION'
   | 'STATUS_REQUEST'
   | 'LIST_MODELS'
+  | 'LIST_PROJECTS'
+  | 'SET_PROJECT'
   | 'CLEAR_MEMORY'
   | 'COMPACT_MEMORY';
 
