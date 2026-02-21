@@ -69,9 +69,28 @@ export function updateConfirmedProject(db: Database.Database, sessionId: string,
   `).run(projectName, sessionId);
 }
 
-export function getConfirmedProject(db: Database.Database, sessionId: string): string | undefined {
+export function updateConfirmedProjects(db: Database.Database, sessionId: string, projectNames: string[]): void {
+  const value = JSON.stringify(projectNames);
+  db.prepare(`
+    UPDATE sessions SET confirmed_project = ?, updated_at = datetime('now') WHERE session_id = ?
+  `).run(value, sessionId);
+}
+
+export function getConfirmedProjects(db: Database.Database, sessionId: string): string[] {
   const row = db.prepare(`SELECT confirmed_project FROM sessions WHERE session_id = ?`).get(sessionId) as { confirmed_project?: string } | undefined;
-  return row?.confirmed_project ?? undefined;
+  const raw = row?.confirmed_project;
+  if (!raw) return [];
+  // Try JSON array first (new format), fall back to plain string (old format)
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch { /* not JSON */ }
+  return [raw];
+}
+
+export function getConfirmedProject(db: Database.Database, sessionId: string): string | undefined {
+  const projects = getConfirmedProjects(db, sessionId);
+  return projects[0] ?? undefined;
 }
 
 export function getSessionMessages(db: Database.Database, sessionId: string, limit = 50): Array<{ sender: string; content: string; created_at: string }> {
