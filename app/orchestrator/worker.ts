@@ -32,6 +32,7 @@ let sessionId = '';
 let sessionName = '';
 let projectPath = '';
 let workspaceDir = '';
+let confirmedProjectPaths: string[] = [];
 let initialized = false;
 let currentTaskId: string | null = null;
 let cancelRequested = false;
@@ -206,6 +207,7 @@ When asked to research something (find YouTube channels, compare options, gather
     sessionName,
     currentTaskId: () => currentTaskId,
     preferAPIKeyClaude: initConfig.preferAPIKeyClaude,
+    confirmedProjectPaths: () => confirmedProjectPaths,
     sendNotification: (message: string) => {
       send({
         type: 'WORKER_PROGRESS',
@@ -673,6 +675,11 @@ async function main(): Promise<void> {
         }
         break;
       }
+      case 'WORKER_UPDATE_PROJECTS':
+        projectPath = msg.primaryProjectPath;
+        confirmedProjectPaths = msg.projectPaths;
+        log(`Projects updated: primary=${msg.primaryProjectPath}, all=[${msg.projectPaths.join(', ')}]`);
+        break;
       case 'WORKER_CLOSE':
         log('Close requested, exiting...');
         process.exit(0);

@@ -27,6 +27,7 @@ export interface ToolContext {
   sessionName: string;
   currentTaskId: () => string | null;
   preferAPIKeyClaude?: boolean;
+  confirmedProjectPaths?: () => string[];
   sendNotification: (message: string) => void;
   askUser: (opts: {
     toolCallId: string;

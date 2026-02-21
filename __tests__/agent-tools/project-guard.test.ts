@@ -44,4 +44,45 @@ describe('assertProjectConfirmed', () => {
       workspaceDir,
     )).not.toThrow();
   });
+
+  describe('assertProjectConfirmed with confirmedPaths', () => {
+    const workspaceDir = '/home/user/milo-workspace';
+
+    it('should allow when projectPath matches one of confirmedPaths', () => {
+      expect(() => assertProjectConfirmed(
+        '/home/user/milo-workspace/PROJECTS/my-app',
+        workspaceDir,
+        'PROJECTS',
+        ['/home/user/milo-workspace/PROJECTS/my-app', '/home/user/milo-workspace/PROJECTS/api-backend'],
+      )).not.toThrow();
+    });
+
+    it('should allow when projectPath is subfolder of a confirmedPath', () => {
+      expect(() => assertProjectConfirmed(
+        '/home/user/milo-workspace/PROJECTS/my-app/src',
+        workspaceDir,
+        'PROJECTS',
+        ['/home/user/milo-workspace/PROJECTS/my-app'],
+      )).not.toThrow();
+    });
+
+    it('should throw when projectPath is not in confirmedPaths', () => {
+      expect(() => assertProjectConfirmed(
+        '/home/user/milo-workspace/PROJECTS/secret-project',
+        workspaceDir,
+        'PROJECTS',
+        ['/home/user/milo-workspace/PROJECTS/my-app'],
+      )).toThrow('No project has been confirmed');
+    });
+
+    it('should still throw for PROJECTS root even with confirmedPaths', () => {
+      expect(() => assertProjectConfirmed(
+        '/home/user/milo-workspace/PROJECTS',
+        workspaceDir,
+        'PROJECTS',
+        ['/home/user/milo-workspace/PROJECTS/my-app'],
+      )).toThrow('No project has been confirmed');
+    });
+  });
+
 });
