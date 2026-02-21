@@ -11,7 +11,7 @@
  * Replaces the old MiloAgent class.
  */
 
-import { existsSync, unlinkSync, mkdirSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { AgentConfig } from '../config/index.js';
@@ -688,6 +688,25 @@ export class Orchestrator {
       return;
     }
 
+    // LIST_PROJECTS doesn't need a session/worker — handle inline
+    if (workItemType === 'LIST_PROJECTS') {
+      const projectsRoot = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
+      let projectNames: string[] = [];
+      if (existsSync(projectsRoot)) {
+        projectNames = readdirSync(projectsRoot, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+          .map((d) => d.name)
+          .sort();
+      }
+
+      const text = projectNames.length > 0
+        ? `Projects (${projectNames.length}):\n${projectNames.map((n) => `- ${n}`).join('\n')}`
+        : 'No projects found in PROJECTS/. Create one by starting a coding session.';
+
+      this.publishEvent(message.sessionId, text);
+      enqueueOutbox(this.db, 'send_message', { sessionId: message.sessionId, content: text }, message.sessionId);
+      return;
+    }
     // Determine project path — restore confirmed project if available
     let projectPath = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
     const confirmedProject = getConfirmedProject(this.db, message.sessionId);
@@ -723,7 +742,7 @@ export class Orchestrator {
     }
 
     // Enqueue work item
-    const isControl = ['CANCEL', 'CLOSE_SESSION', 'STATUS_REQUEST', 'LIST_MODELS', 'CLEAR_MEMORY', 'COMPACT_MEMORY'].includes(workItemType);
+    const isControl = ['CANCEL', 'CLOSE_SESSION', 'STATUS_REQUEST', 'LIST_MODELS', 'LIST_PROJECTS', 'SET_PROJECT', 'CLEAR_MEMORY', 'COMPACT_MEMORY'].includes(workItemType);
     const workItem: WorkItem = {
       id: `wi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: workItemType,
@@ -754,6 +773,8 @@ export class Orchestrator {
     if (action === 'LIST_MODELS') return 'LIST_MODELS';
     if (action === 'CLEAR_MEMORY') return 'CLEAR_MEMORY';
     if (action === 'COMPACT_MEMORY') return 'COMPACT_MEMORY';
+    if (action === 'LIST_PROJECTS') return 'LIST_PROJECTS';
+    if (action === 'SET_PROJECT') return 'SET_PROJECT';
 
     // Text pattern matching fallback
     const lower = message.content.toLowerCase().trim();
@@ -762,6 +783,7 @@ export class Orchestrator {
     if (lower === 'close' || lower === '/close' || lower === 'close session') return 'CLOSE_SESSION';
     if (lower === 'status' || lower === '/status') return 'STATUS_REQUEST';
     if (lower === '/models' || lower === 'models') return 'LIST_MODELS';
+    if (lower === '/projects' || lower === 'projects' || lower === 'list projects') return 'LIST_PROJECTS';
 
     // Default: user message (the worker handles the specifics)
     return 'USER_MESSAGE';
