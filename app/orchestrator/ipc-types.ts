@@ -89,6 +89,13 @@ export interface WorkerCompactContextMessage {
   sessionId: string;
 }
 
+export interface WorkerUpdateProjectsMessage {
+  type: 'WORKER_UPDATE_PROJECTS';
+  sessionId: string;
+  projectPaths: string[];
+  primaryProjectPath: string;
+}
+
 export type OrchestratorToWorker =
   | WorkerInitMessage
   | WorkerTaskMessage
@@ -98,7 +105,8 @@ export type OrchestratorToWorker =
   | WorkerAnswerMessage
   | WorkerFormResponseMessage
   | WorkerClearContextMessage
-  | WorkerCompactContextMessage;
+  | WorkerCompactContextMessage
+  | WorkerUpdateProjectsMessage;
 
 // --- Worker → Orchestrator ---
 
