@@ -385,8 +385,20 @@ export class Orchestrator {
       this.logger.info(`Setting heartbeat interval to ${interval} minutes`);
       this.config.scheduler.heartbeatIntervalMinutes = interval;
       this.scheduler.setInterval(interval);
-      updateConfigFile({ scheduler: { heartbeatIntervalMinutes: interval } });
-      this.logger.info(`Heartbeat interval persisted to config.json`);
+      try {
+        updateConfigFile({ scheduler: { heartbeatIntervalMinutes: interval } });
+        this.logger.info(`Heartbeat interval persisted to config.json`);
+      } catch (err) {
+        this.logger.warn('Failed to persist heartbeat interval to config.json:', err);
+      }
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'ui_action_result',
+          agentId: this.agentId,
+          content: `Heartbeat interval set to ${interval} minutes`,
+          timestamp: new Date().toISOString(),
+        });
+      }
     } else if (message.type === 'ui_action' && (message as unknown as Record<string, unknown>).action === 'check_milo_agent_updates') {
       this.logger.info('Manual update check requested');
       await this.handleCheckForUpdates(message as unknown as Record<string, unknown>);
