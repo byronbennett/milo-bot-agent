@@ -9,6 +9,11 @@
  * is recreated with the new system prompt and model.
  */
 
+// Strip NODE_OPTIONS so child processes (shell scripts, npm, node) don't
+// inherit the tsx loader hook which breaks them. The loader is already active
+// in this process — the env var is only needed at process startup.
+delete process.env.NODE_OPTIONS;
+
 import { sendIPC, readIPC } from './ipc.js';
 import type {
   WorkerInitMessage,
