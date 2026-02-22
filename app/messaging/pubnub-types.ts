@@ -29,6 +29,7 @@ export interface PubNubControlMessage {
   sessionId: string;
   sessionName?: string;
   force?: boolean;
+  intervalMinutes?: number;
   timestamp: string;
 }
 
