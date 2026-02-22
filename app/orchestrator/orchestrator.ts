@@ -1675,6 +1675,7 @@ export class Orchestrator {
     lines.push(`| **PubNub** | \`${pubStatus}\` |`);
     lines.push(`| **Streaming** | \`${this.config.streaming ? 'on' : 'off'}\` |`);
     lines.push(`| **Version** | \`${this.currentVersion}\` (${this.installMethod}) |`);
+    lines.push(`| **Heartbeat** | \`${this.config.scheduler.heartbeatIntervalMinutes} min\` |`);
     if (this.needsUpdate) {
       lines.push(`| **Latest** | \`${this.latestVersion}\` — **update available** |`);
     }
