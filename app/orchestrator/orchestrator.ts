@@ -399,6 +399,18 @@ export class Orchestrator {
           timestamp: new Date().toISOString(),
         });
       }
+    } else if (message.ui_action === 'PING') {
+      this.logger.info('Ping received from browser');
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'ui_action_result',
+          agentId: this.agentId,
+          action: 'PING',
+          requestId: (message as unknown as Record<string, unknown>).requestId as string,
+          content: 'pong',
+          timestamp: new Date().toISOString(),
+        });
+      }
     } else if (message.type === 'ui_action' && (message as unknown as Record<string, unknown>).action === 'check_milo_agent_updates') {
       this.logger.info('Manual update check requested');
       await this.handleCheckForUpdates(message as unknown as Record<string, unknown>);
