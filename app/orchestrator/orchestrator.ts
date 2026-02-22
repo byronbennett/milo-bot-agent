@@ -15,7 +15,7 @@ import { existsSync, unlinkSync, mkdirSync, readdirSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import type { AgentConfig } from '../config/index.js';
+import { updateConfigFile, type AgentConfig } from '../config/index.js';
 import { WebAppAdapter, PubNubAdapter } from '../messaging/index.js';
 import type { PubNubControlMessage, PubNubSkillCommand, PubNubFormResponseCommand } from '../messaging/pubnub-types.js';
 import { SkillInstaller } from '../skills/skill-installer.js';
@@ -376,6 +376,17 @@ export class Orchestrator {
       await this.handleDeleteSession(message.sessionId, message.sessionName);
     } else if (message.ui_action === 'UPDATE_MILO_AGENT') {
       await this.handleSelfUpdate(message.force);
+    } else if (message.ui_action === 'SET_HEARTBEAT_INTERVAL') {
+      const interval = message.intervalMinutes;
+      if (typeof interval !== 'number' || interval <= 2 || interval > 60) {
+        this.logger.warn(`Invalid heartbeat interval: ${interval} (must be > 2 and <= 60)`);
+        return;
+      }
+      this.logger.info(`Setting heartbeat interval to ${interval} minutes`);
+      this.config.scheduler.heartbeatIntervalMinutes = interval;
+      this.scheduler.setInterval(interval);
+      updateConfigFile({ scheduler: { heartbeatIntervalMinutes: interval } });
+      this.logger.info(`Heartbeat interval persisted to config.json`);
     } else if (message.type === 'ui_action' && (message as unknown as Record<string, unknown>).action === 'check_milo_agent_updates') {
       this.logger.info('Manual update check requested');
       await this.handleCheckForUpdates(message as unknown as Record<string, unknown>);
