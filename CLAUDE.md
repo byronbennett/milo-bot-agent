@@ -176,6 +176,7 @@ These are non-session control actions sent as PubNub control messages with `ui_a
 | `DELETE_SESSION` | Delete a session, stop its worker, remove session file |
 | `UPDATE_MILO_AGENT` | Self-update: pull latest code, rebuild, restart. Supports `force: true` to bypass busy-worker check |
 | `skill_install` / `skill_update` / `skill_delete` | Manage skills on the agent |
+| `SET_HEARTBEAT_INTERVAL` | Set heartbeat interval. Requires `intervalMinutes` (> 2, <= 60). Persists to config.json |
 
 ## Config: `update` Section
 
