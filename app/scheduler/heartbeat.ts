@@ -87,4 +87,11 @@ export class HeartbeatScheduler {
   get running(): boolean {
     return this.isRunning;
   }
+
+  /**
+   * Get current interval in minutes
+   */
+  get interval(): number {
+    return this.intervalMinutes;
+  }
 }
