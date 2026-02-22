@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, watchFile } from 'fs';
+import { existsSync, readFileSync, watchFile, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { agentConfigSchema, type AgentConfig } from './schema';
@@ -199,4 +199,28 @@ export function watchConfig(
       .then((config) => callback(config))
       .catch((error) => console.error('Failed to reload config:', error));
   });
+}
+
+/**
+ * Persist a partial config update to the config.json file.
+ * Reads the current file, deep-merges the patch, and writes back.
+ */
+export function updateConfigFile(patch: Record<string, unknown>, configPath?: string): void {
+  const path = configPath || getDefaultConfigPath();
+
+  let current: Record<string, unknown> = {};
+  if (existsSync(path)) {
+    current = JSON.parse(readFileSync(path, 'utf-8'));
+  }
+
+  // Deep merge one level (handles nested objects like scheduler.*)
+  for (const [key, value] of Object.entries(patch)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value) && typeof current[key] === 'object' && current[key] !== null) {
+      current[key] = { ...(current[key] as Record<string, unknown>), ...(value as Record<string, unknown>) };
+    } else {
+      current[key] = value;
+    }
+  }
+
+  writeFileSync(path, JSON.stringify(current, null, 2) + '\n');
 }
