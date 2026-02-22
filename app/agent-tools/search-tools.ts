@@ -13,6 +13,11 @@ const ListFilesParams = Type.Object({
   maxDepth: Type.Optional(Type.Number({ description: 'Max directory depth (default: 3)' })),
 });
 
+const ListFoldersParams = Type.Object({
+  path: Type.Optional(Type.String({ description: 'Directory path (default: project root)' })),
+  maxDepth: Type.Optional(Type.Number({ description: 'Max directory depth (default: 3)' })),
+});
+
 const GrepParams = Type.Object({
   pattern: Type.String({ description: 'Regex pattern to search for' }),
   path: Type.Optional(Type.String({ description: 'Directory or file to search in (default: project root)' })),
@@ -56,6 +61,40 @@ export function createSearchTools(projectPath: string): AgentTool<any>[] {
     },
   };
 
+  const listFoldersTool: AgentTool<typeof ListFoldersParams> = {
+    name: 'list_folders',
+    label: 'List Folders',
+    description: 'List subdirectories within a directory. Returns folder paths relative to project root.',
+    parameters: ListFoldersParams,
+    execute: async (_toolCallId, params) => {
+      const dir = params.path ?? '.';
+      const maxDepth = params.maxDepth ?? 3;
+      const folders: string[] = [];
+
+      function walk(currentPath: string, depth: number) {
+        if (depth > maxDepth) return;
+        try {
+          const entries = readdirSync(join(projectPath, currentPath));
+          for (const entry of entries) {
+            if (entry.startsWith('.') || entry === 'node_modules') continue;
+            const relPath = join(currentPath, entry);
+            const stat = statSync(join(projectPath, relPath));
+            if (stat.isDirectory()) {
+              folders.push(relPath + '/');
+              walk(relPath, depth + 1);
+            }
+          }
+        } catch { /* skip unreadable dirs */ }
+      }
+
+      walk(dir === '.' ? '' : dir, 0);
+      return {
+        content: [{ type: 'text', text: folders.join('\n') || '(no subdirectories)' }],
+        details: { count: folders.length },
+      };
+    },
+  };
+
   const grepTool: AgentTool<typeof GrepParams> = {
     name: 'grep',
     label: 'Search Content',
@@ -91,5 +130,5 @@ export function createSearchTools(projectPath: string): AgentTool<any>[] {
     },
   };
 
-  return [listFilesTool, grepTool];
+  return [listFilesTool, listFoldersTool, grepTool];
 }
