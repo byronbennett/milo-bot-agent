@@ -207,3 +207,17 @@ These are non-session control actions sent as PubNub control messages with `ui_a
 - `salt` — PBKDF2 salt, generated during `milo init`. Base64-encoded 32 bytes.
 - `wrappedDEK` — Data Encryption Key wrapped with the master key derived from password. Base64-encoded.
 - `wrappedDEKIV` — IV used to wrap the DEK. Base64-encoded 12 bytes.
+
+## Config: `openai` Section
+
+```json
+{
+  "openai": {
+    "authMethod": "codex-login"
+  }
+}
+```
+
+- `authMethod` — `"codex-login"` (OAuth via browser), `"api-key"` (OPENAI_API_KEY), or `"none"`. Default: `"none"`.
+- When `codex-login`, the agent relies on Codex CLI's stored OAuth credentials. No API key is needed.
+- When `api-key`, the agent uses `OPENAI_API_KEY` from keychain/env and passes it as `CODEX_API_KEY`.
