@@ -99,6 +99,10 @@ export const encryptionConfigSchema = z.object({
   wrappedDEKIV: z.string().optional(),
 });
 
+export const openaiConfigSchema = z.object({
+  authMethod: z.enum(['codex-login', 'api-key', 'none']).default('none'),
+});
+
 export const agentConfigSchema = z.object({
   agentName: z.string().min(1).max(100),
   agentId: z.string().optional(),
@@ -119,6 +123,7 @@ export const agentConfigSchema = z.object({
   streaming: z.boolean().default(false),
   onboardingComplete: z.boolean().default(false),
   encryption: encryptionConfigSchema.default({ level: 1 }),
+  openai: openaiConfigSchema.default({}),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
@@ -132,3 +137,4 @@ export type MessagingConfig = z.infer<typeof messagingConfigSchema>;
 export type UpdateConfig = z.infer<typeof updateConfigSchema>;
 export type LocalModelsConfig = z.infer<typeof localModelsConfigSchema>;
 export type EncryptionConfig = z.infer<typeof encryptionConfigSchema>;
+export type OpenAIConfig = z.infer<typeof openaiConfigSchema>;

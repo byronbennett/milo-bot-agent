@@ -83,6 +83,9 @@ export const defaultConfig: AgentConfig = {
   encryption: {
     level: 1,
   },
+  openai: {
+    authMethod: 'none',
+  },
 };
 
 /**

@@ -79,6 +79,10 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
           ...rawConfig.messaging?.telegram,
         },
       },
+      openai: {
+        ...defaultConfig.openai,
+        ...rawConfig.openai,
+      },
     });
 
     // Propagate top-level ai.model to ai.agent.model when the user set
