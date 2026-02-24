@@ -91,6 +91,17 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
       config.ai.agent.model = config.ai.model;
     }
 
+    // Auto-detect provider from model name when not explicitly set
+    if (rawConfig.ai?.model && !rawConfig.ai?.agent?.provider) {
+      const model = config.ai.model;
+      if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) {
+        config.ai.agent.provider = 'openai';
+      } else if (model.startsWith('gemini-')) {
+        config.ai.agent.provider = 'google';
+      }
+      // else keep default 'anthropic'
+    }
+
     // Load .env file if exists
     loadEnvFile(config.workspace.baseDir);
 

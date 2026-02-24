@@ -824,14 +824,24 @@ export async function runInit(options: {
     if (options.aiModel) {
       aiModel = options.aiModel.trim();
     } else if (isInteractive) {
-      aiModel = await select({
-        message: 'Which model should Milo use for AI calls?',
-        choices: [
+      const modelChoices: { name: string; value: string }[] = [
           { name: 'Claude Sonnet 4.6 (recommended)', value: 'claude-sonnet-4-6' },
           { name: 'Claude Haiku 4.5 (faster, cheaper)', value: 'claude-haiku-4-5' },
           { name: 'Claude Opus 4.6 (most capable)', value: 'claude-opus-4-6' },
-          { name: 'Custom model ID...', value: '__custom__' },
-        ],
+        ];
+
+      if (openaiAuthMethod !== 'none' || openaiKey) {
+        modelChoices.push(
+          { name: 'GPT-5.3 Codex (OpenAI)', value: 'gpt-5.3-codex' },
+          { name: 'GPT-5.3 Codex Spark (OpenAI, faster)', value: 'gpt-5.3-codex-spark' },
+        );
+      }
+
+      modelChoices.push({ name: 'Custom model ID...', value: '__custom__' });
+
+      aiModel = await select({
+        message: 'Which model should Milo use for AI calls?',
+        choices: modelChoices,
         default: existingModel,
       });
 
