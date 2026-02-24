@@ -5,6 +5,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, copyFi
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
+import { spawnSync } from 'child_process';
+import { findCodexBinary } from '../agent-tools/codex-cli-runtime.js';
 import { Logger } from '../utils/logger';
 import {
   saveApiKey, loadApiKey,
@@ -426,6 +428,59 @@ function extractServerUrl(apiUrl: string): string {
 }
 
 /**
+ * Run `codex login` interactively, then verify with `codex --version`.
+ * Returns true on success, false on failure.
+ */
+async function runCodexLogin(): Promise<boolean> {
+  let codexBinary: string;
+  try {
+    codexBinary = await findCodexBinary();
+  } catch {
+    console.log('');
+    console.log('   Codex CLI not found. Install it first:');
+    console.log('     npm install -g @openai/codex');
+    console.log('');
+    const fallback = await confirm({
+      message: 'Would you like to enter an API key instead?',
+      default: false,
+    });
+    if (fallback) {
+      return false; // caller will handle API key prompt
+    }
+    return false;
+  }
+
+  console.log('');
+  console.log('   Running codex login... A browser window will open for OpenAI sign-in.');
+  console.log('');
+
+  const loginResult = spawnSync(codexBinary, ['login'], {
+    stdio: 'inherit',
+  });
+
+  if (loginResult.status !== 0) {
+    console.log('');
+    logger.warn('codex login failed or was cancelled.');
+    return false;
+  }
+
+  // Verify auth works
+  console.log('   Verifying authentication...');
+  const verifyResult = spawnSync(codexBinary, ['--version'], {
+    stdio: 'pipe',
+  });
+
+  if (verifyResult.status === 0) {
+    const version = verifyResult.stdout?.toString().trim();
+    console.log(`   Codex CLI authenticated successfully (${version})`);
+    return true;
+  }
+
+  logger.warn('codex --version check failed after login.');
+  return false;
+}
+
+/**
  * Run the init flow programmatically.
  * Accepts the same options object that commander would pass.
  */
@@ -600,6 +655,7 @@ export async function runInit(options: {
     let anthropicKey: string | undefined;
     let openaiKey: string | undefined;
     let geminiKey: string | undefined;
+    let openaiAuthMethod: 'codex-login' | 'api-key' | 'none' = 'none';
 
     // For new setups (no existing keys, no CLI flags), require explicit acceptance
     const hasAnyExistingProviderKey = existing.anthropicKey || existing.openaiKey || existing.geminiKey;
@@ -638,26 +694,105 @@ export async function runInit(options: {
         required: false,
       });
 
-      // --- OpenAI ---
+      // --- OpenAI / Codex ---
       console.log('');
-      console.log('🔑 OpenAI API Key (optional)');
-      console.log('   Enables OpenAI models (GPT-4, o1, etc.) for agent tasks.');
-      console.log('   Get an API key: https://platform.openai.com/api-keys');
+      console.log('🔑 OpenAI / Codex Authentication (optional)');
+      console.log('   Enables OpenAI models (gpt-5.3-codex, gpt-5.3-codex-spark) via Codex CLI.');
       console.log('');
 
-      openaiKey = await promptForKey({
-        label: 'OpenAI API key',
-        existingKey: existing.openaiKey,
-        existingSource: existing.openaiKeySource,
-        validate: validateOpenAIKey,
-        save: saveOpenAIKey,
-        deleteFromKeychain: deleteOpenAIKey,
-        envName: 'OPENAI_API_KEY',
-        resolvedDir,
-        isInteractive,
-        cliValue: options.openaiKey,
-        required: false,
-      });
+      // Check if existing config already has codex-login
+      const existingOpenaiAuth = (existing.config as any)?.openai?.authMethod;
+
+      if (existing.openaiKey) {
+        // User has an existing API key — use existing promptForKey flow
+        openaiKey = await promptForKey({
+          label: 'OpenAI API key',
+          existingKey: existing.openaiKey,
+          existingSource: existing.openaiKeySource,
+          validate: validateOpenAIKey,
+          save: saveOpenAIKey,
+          deleteFromKeychain: deleteOpenAIKey,
+          envName: 'OPENAI_API_KEY',
+          resolvedDir,
+          isInteractive,
+          cliValue: options.openaiKey,
+          required: false,
+        });
+        openaiAuthMethod = openaiKey ? 'api-key' : 'none';
+      } else if (existingOpenaiAuth === 'codex-login') {
+        // Already using codex login
+        const action = await select({
+          message: 'OpenAI is configured via codex login.',
+          choices: [
+            { name: 'Keep codex login', value: 'keep' as const },
+            { name: 'Re-run codex login', value: 'relogin' as const },
+            { name: 'Switch to API key', value: 'apikey' as const },
+            { name: 'Remove OpenAI', value: 'remove' as const },
+          ],
+          default: 'keep' as const,
+        });
+
+        if (action === 'keep') {
+          openaiAuthMethod = 'codex-login';
+        } else if (action === 'relogin') {
+          openaiAuthMethod = await runCodexLogin() ? 'codex-login' : 'none';
+        } else if (action === 'apikey') {
+          const newKey = await input({ message: 'Enter your OpenAI API key:', validate: validateOpenAIKey });
+          openaiKey = newKey.trim();
+          openaiAuthMethod = 'api-key';
+        } else {
+          openaiAuthMethod = 'none';
+        }
+      } else if (options.openaiKey) {
+        // CLI flag provided
+        openaiKey = await promptForKey({
+          label: 'OpenAI API key',
+          existingKey: null,
+          existingSource: null,
+          validate: validateOpenAIKey,
+          save: saveOpenAIKey,
+          deleteFromKeychain: deleteOpenAIKey,
+          envName: 'OPENAI_API_KEY',
+          resolvedDir,
+          isInteractive,
+          cliValue: options.openaiKey,
+          required: false,
+        });
+        openaiAuthMethod = openaiKey ? 'api-key' : 'none';
+      } else {
+        // Fresh setup — offer codex login vs API key vs skip
+        const authChoice = await select({
+          message: 'How would you like to authenticate with OpenAI?',
+          choices: [
+            { name: 'codex login (recommended) — opens browser for OpenAI sign-in', value: 'codex-login' as const },
+            { name: 'Paste an API key', value: 'api-key' as const },
+            { name: 'Skip — don\'t configure OpenAI', value: 'skip' as const },
+          ],
+        });
+
+        if (authChoice === 'codex-login') {
+          openaiAuthMethod = await runCodexLogin() ? 'codex-login' : 'none';
+        } else if (authChoice === 'api-key') {
+          console.log('');
+          console.log('   Get an API key: https://platform.openai.com/api-keys');
+          console.log('');
+          openaiKey = await promptForKey({
+            label: 'OpenAI API key',
+            existingKey: null,
+            existingSource: null,
+            validate: validateOpenAIKey,
+            save: saveOpenAIKey,
+            deleteFromKeychain: deleteOpenAIKey,
+            envName: 'OPENAI_API_KEY',
+            resolvedDir,
+            isInteractive,
+            cliValue: undefined,
+            required: false,
+          });
+          openaiAuthMethod = openaiKey ? 'api-key' : 'none';
+        }
+        // else skip — openaiAuthMethod stays 'none'
+      }
 
       // --- Gemini ---
       console.log('');
@@ -977,6 +1112,9 @@ dist/
           wrappedDEK: encryptionWrappedDEK,
           wrappedDEKIV: encryptionWrappedDEKIV,
         }),
+      },
+      openai: {
+        authMethod: openaiAuthMethod,
       },
       messaging: {
         activeAdapter: 'webapp',
