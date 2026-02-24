@@ -48,7 +48,7 @@ const CodexParams = Type.Object({
     Type.String({ description: 'Override working directory (default: project directory)' }),
   ),
   model: Type.Optional(
-    Type.String({ description: 'Override model (default: gpt-5.3-codex). Examples: o3, gpt-5.3-codex' }),
+    Type.String({ description: 'Override model (default: gpt-5.3-codex). Examples: gpt-5.3-codex, gpt-5.3-codex-spark' }),
   ),
 });
 
@@ -229,7 +229,7 @@ export function createCliAgentTools(ctx: ToolContext): AgentTool<any>[] {
     label: 'OpenAI Codex CLI (AI Coding Agent)',
     description:
       'Delegate a coding task to OpenAI Codex CLI, an AI coding agent. Codex can read/write files, run commands, and execute multi-step coding workflows. ' +
-      'Use this for coding tasks when you want to leverage OpenAI models (o3, gpt-5.3-codex, etc.). ' +
+      'Use this for coding tasks when you want to leverage OpenAI models (gpt-5.3-codex, gpt-5.3-codex-spark, etc.). ' +
       'Supports multi-turn conversations: the first call returns a session_id (thread ID), pass it back on subsequent calls to continue the conversation.',
     parameters: CodexParams,
     execute: async (_toolCallId, params, signal, onUpdate) => {
