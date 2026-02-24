@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { loginOpenAICodex } from '@mariozechner/pi-ai';
 import { Logger } from '../utils/logger';
+import { saveWorkspacePath } from '../config/defaults';
 import {
   saveApiKey, loadApiKey,
   saveAnthropicKey, loadAnthropicKey, deleteAnthropicKey,
@@ -1183,6 +1184,9 @@ dist/
 
     // Write config
     writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    // Save workspace path globally so `milo start` can find it
+    saveWorkspacePath(resolvedDir);
 
     // Sync encryption settings to server
     if (encryptionLevel > 1 && apiKey) {

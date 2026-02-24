@@ -1,3 +1,4 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import type { AgentConfig } from './schema';
@@ -6,6 +7,42 @@ import type { AgentConfig } from './schema';
  * Default configuration values
  */
 export const DEFAULT_WORKSPACE_DIR = join(homedir(), 'milo-workspace');
+
+/**
+ * Global config directory for Milo settings that persist across workspaces.
+ * Stores the active workspace path so `milo start` can find it.
+ */
+const GLOBAL_CONFIG_DIR = join(homedir(), '.milo');
+const WORKSPACE_PATH_FILE = join(GLOBAL_CONFIG_DIR, 'workspace-path');
+
+/**
+ * Save the workspace path to ~/.milo/workspace-path so other commands can find it.
+ */
+export function saveWorkspacePath(workspacePath: string): void {
+  mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
+  writeFileSync(WORKSPACE_PATH_FILE, workspacePath, 'utf-8');
+}
+
+/**
+ * Load the saved workspace path from ~/.milo/workspace-path.
+ * Returns null if not set.
+ */
+export function loadWorkspacePath(): string | null {
+  if (!existsSync(WORKSPACE_PATH_FILE)) return null;
+  try {
+    const saved = readFileSync(WORKSPACE_PATH_FILE, 'utf-8').trim();
+    return saved || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the workspace directory: saved path > default.
+ */
+export function getWorkspaceDir(): string {
+  return loadWorkspacePath() || DEFAULT_WORKSPACE_DIR;
+}
 
 export const defaultConfig: AgentConfig = {
   agentName: 'Milo',
@@ -89,8 +126,8 @@ export const defaultConfig: AgentConfig = {
 };
 
 /**
- * Get the default config path
+ * Get the default config path, checking saved workspace path first.
  */
 export function getDefaultConfigPath(): string {
-  return join(DEFAULT_WORKSPACE_DIR, 'config.json');
+  return join(getWorkspaceDir(), 'config.json');
 }
