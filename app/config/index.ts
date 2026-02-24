@@ -95,7 +95,10 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
     if (rawConfig.ai?.model && !rawConfig.ai?.agent?.provider) {
       const model = config.ai.model;
       if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) {
-        config.ai.agent.provider = 'openai';
+        // Use openai-codex provider for OAuth-based auth, openai for API key
+        config.ai.agent.provider = config.openai.authMethod === 'codex-login'
+          ? 'openai-codex'
+          : 'openai';
       } else if (model.startsWith('gemini-')) {
         config.ai.agent.provider = 'google';
       }

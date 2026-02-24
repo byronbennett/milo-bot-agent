@@ -77,6 +77,9 @@ let initConfig: WorkerInitMessage['config'] = {
   skillsDir: '',
 };
 
+// OpenAI OAuth credentials (from orchestrator via WORKER_INIT)
+let oauthCredentials: { access: string; refresh: string; expires: number } | null = null;
+
 function send(msg: WorkerToOrchestrator): void {
   sendIPC(process.stdout, msg);
 }
@@ -96,6 +99,11 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   personasDir = msg.config.personasDir;
   skillsDir = msg.config.skillsDir;
   streaming = msg.config.streaming ?? false;
+
+  // Store OAuth credentials if provided
+  if (msg.config.openaiOAuth) {
+    oauthCredentials = { ...msg.config.openaiOAuth };
+  }
 
   initialized = true;
   log(`Initialized (project=${projectPath})`);
@@ -328,6 +336,26 @@ When asked to research something (find YouTube channels, compare options, gather
       systemPrompt,
       model,
       tools,
+    },
+    getApiKey: async (providerName: string) => {
+      if (providerName === 'openai-codex' && oauthCredentials) {
+        // Refresh if expired (with 60s buffer)
+        if (Date.now() >= oauthCredentials.expires - 60_000) {
+          try {
+            const { refreshOpenAICodexToken } = await import('@mariozechner/pi-ai');
+            const refreshed = await refreshOpenAICodexToken(oauthCredentials.refresh);
+            oauthCredentials = { access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires };
+            // Notify orchestrator to persist refreshed tokens
+            send({ type: 'WORKER_OAUTH_REFRESHED', sessionId, credentials: oauthCredentials } as any);
+            log('OpenAI OAuth token refreshed');
+          } catch (err) {
+            log(`OpenAI OAuth token refresh failed: ${err}`);
+            // Return the old token — the API call may still succeed or will give a clear auth error
+          }
+        }
+        return oauthCredentials.access;
+      }
+      return undefined;
     },
     convertToLlm: (messages) =>
       messages.filter((m) => 'role' in m && ['user', 'assistant', 'toolResult'].includes((m as any).role)),

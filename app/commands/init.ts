@@ -5,8 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, copyFi
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
-import { spawnSync } from 'child_process';
-import { findCodexBinary } from '../agent-tools/codex-cli-runtime.js';
+import { loginOpenAICodex } from '@mariozechner/pi-ai';
 import { Logger } from '../utils/logger';
 import {
   saveApiKey, loadApiKey,
@@ -14,6 +13,7 @@ import {
   saveOpenAIKey, loadOpenAIKey, deleteOpenAIKey,
   saveGeminiKey, loadGeminiKey, deleteGeminiKey,
   saveEncryptionPassword,
+  saveOpenAIOAuth,
   isKeychainAvailable,
 } from '../utils/keychain';
 import {
@@ -428,56 +428,48 @@ function extractServerUrl(apiUrl: string): string {
 }
 
 /**
- * Run `codex login` interactively, then verify with `codex --version`.
+ * Run OpenAI Codex OAuth PKCE flow via pi-ai's loginOpenAICodex.
+ * Opens a browser for OpenAI sign-in and stores tokens in OS keychain.
  * Returns true on success, false on failure.
  */
-async function runCodexLogin(): Promise<boolean> {
-  let codexBinary: string;
+async function runCodexOAuthLogin(): Promise<boolean> {
+  console.log('');
+  console.log('   Opening browser for OpenAI sign-in...');
+  console.log('');
+
   try {
-    codexBinary = await findCodexBinary();
-  } catch {
-    console.log('');
-    console.log('   Codex CLI not found. Install it first:');
-    console.log('     npm install -g @openai/codex');
-    console.log('');
-    const fallback = await confirm({
-      message: 'Would you like to enter an API key instead?',
-      default: false,
+    const credentials = await loginOpenAICodex({
+      onAuth: (info) => {
+        console.log(`   Authenticate at: ${info.url}`);
+        if (info.instructions) {
+          console.log(`   ${info.instructions}`);
+        }
+        // Open browser
+        open(info.url).catch(() => {
+          // Browser failed to open, user will need to manually open the URL
+        });
+      },
+      onPrompt: async (prompt) => {
+        const answer = await input({
+          message: prompt.message,
+          default: prompt.placeholder,
+        });
+        return answer;
+      },
+      onProgress: (message) => {
+        console.log(`   ${message}`);
+      },
     });
-    if (fallback) {
-      return false; // caller will handle API key prompt
-    }
-    return false;
-  }
 
-  console.log('');
-  console.log('   Running codex login... A browser window will open for OpenAI sign-in.');
-  console.log('');
-
-  const loginResult = spawnSync(codexBinary, ['login'], {
-    stdio: 'inherit',
-  });
-
-  if (loginResult.status !== 0) {
-    console.log('');
-    logger.warn('codex login failed or was cancelled.');
-    return false;
-  }
-
-  // Verify auth works
-  console.log('   Verifying authentication...');
-  const verifyResult = spawnSync(codexBinary, ['--version'], {
-    stdio: 'pipe',
-  });
-
-  if (verifyResult.status === 0) {
-    const version = verifyResult.stdout?.toString().trim();
-    console.log(`   Codex CLI authenticated successfully (${version})`);
+    // Save tokens to keychain
+    await saveOpenAIOAuth(credentials);
+    console.log('   OpenAI OAuth authenticated successfully');
     return true;
+  } catch (err) {
+    console.log('');
+    logger.warn(`OpenAI OAuth login failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   }
-
-  logger.warn('codex --version check failed after login.');
-  return false;
 }
 
 /**
@@ -735,7 +727,7 @@ export async function runInit(options: {
         if (action === 'keep') {
           openaiAuthMethod = 'codex-login';
         } else if (action === 'relogin') {
-          openaiAuthMethod = await runCodexLogin() ? 'codex-login' : 'none';
+          openaiAuthMethod = await runCodexOAuthLogin() ? 'codex-login' : 'none';
         } else if (action === 'apikey') {
           const newKey = await input({ message: 'Enter your OpenAI API key:', validate: validateOpenAIKey });
           openaiKey = newKey.trim();
@@ -771,7 +763,7 @@ export async function runInit(options: {
         });
 
         if (authChoice === 'codex-login') {
-          openaiAuthMethod = await runCodexLogin() ? 'codex-login' : 'none';
+          openaiAuthMethod = await runCodexOAuthLogin() ? 'codex-login' : 'none';
         } else if (authChoice === 'api-key') {
           console.log('');
           console.log('   Get an API key: https://platform.openai.com/api-keys');

@@ -31,6 +31,7 @@ export interface WorkerInitMessage {
     apiKey: string;
     personasDir: string;
     skillsDir: string;
+    openaiOAuth?: { access: string; refresh: string; expires: number };
   };
 }
 
@@ -228,6 +229,12 @@ export interface WorkerContextCompactedMessage {
   contextSize: ContextSize;
 }
 
+export interface WorkerOAuthRefreshedMessage {
+  type: 'WORKER_OAUTH_REFRESHED';
+  sessionId: string;
+  credentials: { access: string; refresh: string; expires: number };
+}
+
 export type WorkerToOrchestrator =
   | WorkerReadyMessage
   | WorkerTaskStartedMessage
@@ -243,7 +250,8 @@ export type WorkerToOrchestrator =
   | WorkerFormRequestMessage
   | WorkerProjectSetMessage
   | WorkerContextClearedMessage
-  | WorkerContextCompactedMessage;
+  | WorkerContextCompactedMessage
+  | WorkerOAuthRefreshedMessage;
 
 // Union of all IPC messages
 export type IPCMessage = OrchestratorToWorker | WorkerToOrchestrator;

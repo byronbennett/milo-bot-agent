@@ -48,7 +48,7 @@ import { discoverSkills } from '../skills/skills-registry.js';
 import { getCuratedAllowList, invalidateCuratedCache } from '../models/curated-models.js';
 import { detectLocalModels } from '../models/local-models.js';
 import { encrypt, decrypt, deriveKey, unwrapDEK } from '../crypto/encryption.js';
-import { loadEncryptionPassword } from '../utils/keychain.js';
+import { loadEncryptionPassword, loadOpenAIOAuth, saveOpenAIOAuth, type OpenAIOAuthCredentials } from '../utils/keychain.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -83,6 +83,7 @@ export class Orchestrator {
   private installMethod: InstallMethod = 'git';
   private updateCheckTimer: NodeJS.Timeout | null = null;
   private dek: Buffer | null = null;
+  private openaiOAuth: OpenAIOAuthCredentials | null = null;
 
   constructor(options: OrchestratorOptions) {
     this.config = options.config;
@@ -142,7 +143,21 @@ export class Orchestrator {
       }
     }
 
-    // 1c. Recover orphaned sessions from prior crash
+    // 1c. Load OpenAI OAuth tokens from keychain (if codex-login auth)
+    if (this.config.openai.authMethod === 'codex-login') {
+      try {
+        this.openaiOAuth = await loadOpenAIOAuth();
+        if (this.openaiOAuth) {
+          this.logger.info('OpenAI OAuth tokens loaded from keychain');
+        } else {
+          this.logger.warn('codex-login auth configured but no OAuth tokens found in keychain. Run `milo init` to authenticate.');
+        }
+      } catch (err) {
+        this.logger.warn('Failed to load OpenAI OAuth tokens:', err);
+      }
+    }
+
+    // 1d. Recover orphaned sessions from prior crash
     this.recoverOrphanedSessions();
 
     // 2. Create session actor manager
@@ -160,6 +175,7 @@ export class Orchestrator {
       apiKey: process.env.MILO_API_KEY || '',
       personasDir: join(this.config.workspace.baseDir, this.config.workspace.personasDir),
       skillsDir: join(this.config.workspace.baseDir, this.config.workspace.skillsDir),
+      openaiOAuth: this.openaiOAuth ?? undefined,
       logger: this.logger,
       onWorkerEvent: this.handleWorkerEvent.bind(this),
       onWorkerStateChange: (sessionId: string, pid: number | null, state: WorkerState) => {
@@ -1203,6 +1219,17 @@ export class Orchestrator {
         insertSessionMessage(this.db, sessionId, 'agent', event.question);
         enqueueOutbox(this.db, 'send_message', { sessionId, content: event.question }, sessionId);
         break;
+
+      case 'WORKER_OAUTH_REFRESHED': {
+        // Persist refreshed tokens to keychain and update in-memory + actor manager
+        this.openaiOAuth = event.credentials;
+        this.actorManager.updateOpenAIOAuth(event.credentials);
+        saveOpenAIOAuth(event.credentials).catch((err) => {
+          this.logger.warn('Failed to persist refreshed OAuth tokens:', err);
+        });
+        this.logger.verbose('OpenAI OAuth tokens refreshed and persisted');
+        break;
+      }
 
       case 'WORKER_FORM_REQUEST': {
         const { formDefinition } = event;

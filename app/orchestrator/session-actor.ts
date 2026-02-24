@@ -38,6 +38,7 @@ export interface SessionActorManagerOptions {
   apiKey: string;
   personasDir: string;
   skillsDir: string;
+  openaiOAuth?: { access: string; refresh: string; expires: number };
   logger: Logger;
   onWorkerEvent: (sessionId: string, event: WorkerToOrchestrator) => void;
   onWorkerStateChange?: (sessionId: string, pid: number | null, state: WorkerState) => void;
@@ -252,6 +253,13 @@ export class SessionActorManager {
     }
   }
 
+  /**
+   * Update the cached OpenAI OAuth tokens (e.g. after a worker refresh).
+   */
+  updateOpenAIOAuth(creds: { access: string; refresh: string; expires: number }): void {
+    this.options.openaiOAuth = creds;
+  }
+
   // --- Private helpers ---
 
   private setWorkerState(actor: SessionActor, state: WorkerState): void {
@@ -319,6 +327,7 @@ export class SessionActorManager {
         apiKey: this.options.apiKey,
         personasDir: this.options.personasDir,
         skillsDir: this.options.skillsDir,
+        openaiOAuth: this.options.openaiOAuth,
       },
     });
 
@@ -415,6 +424,7 @@ export class SessionActorManager {
 
       case 'WORKER_CONTEXT_CLEARED':
       case 'WORKER_CONTEXT_COMPACTED':
+      case 'WORKER_OAUTH_REFRESHED':
         // Forward to orchestrator — no state change needed in actor
         break;
     }

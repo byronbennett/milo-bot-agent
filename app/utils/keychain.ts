@@ -20,6 +20,9 @@ const ACCOUNT_ANTHROPIC_KEY = 'anthropic-api-key';
 const ACCOUNT_OPENAI_KEY = 'openai-api-key';
 const ACCOUNT_GEMINI_KEY = 'gemini-api-key';
 const ACCOUNT_ENCRYPTION_PASSWORD = 'encryption-password';
+const ACCOUNT_OPENAI_OAUTH_ACCESS = 'openai-oauth-access';
+const ACCOUNT_OPENAI_OAUTH_REFRESH = 'openai-oauth-refresh';
+const ACCOUNT_OPENAI_OAUTH_EXPIRES = 'openai-oauth-expires';
 
 /** Per-account in-memory cache so repeated loads don't spawn subprocesses */
 const cache = new Map<string, string | null>();
@@ -334,6 +337,41 @@ export async function loadEncryptionPassword(): Promise<string | null> {
 
 export async function deleteEncryptionPassword(): Promise<void> {
   return deleteCredential(ACCOUNT_ENCRYPTION_PASSWORD);
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI OAuth token helpers
+// ---------------------------------------------------------------------------
+
+export interface OpenAIOAuthCredentials {
+  access: string;
+  refresh: string;
+  expires: number;
+}
+
+export async function saveOpenAIOAuth(creds: OpenAIOAuthCredentials): Promise<void> {
+  await saveCredential(ACCOUNT_OPENAI_OAUTH_ACCESS, creds.access);
+  await saveCredential(ACCOUNT_OPENAI_OAUTH_REFRESH, creds.refresh);
+  await saveCredential(ACCOUNT_OPENAI_OAUTH_EXPIRES, String(creds.expires));
+}
+
+export async function loadOpenAIOAuth(): Promise<OpenAIOAuthCredentials | null> {
+  const access = await loadCredential(ACCOUNT_OPENAI_OAUTH_ACCESS);
+  const refresh = await loadCredential(ACCOUNT_OPENAI_OAUTH_REFRESH);
+  const expiresStr = await loadCredential(ACCOUNT_OPENAI_OAUTH_EXPIRES);
+
+  if (!access || !refresh || !expiresStr) return null;
+
+  const expires = Number(expiresStr);
+  if (isNaN(expires)) return null;
+
+  return { access, refresh, expires };
+}
+
+export async function deleteOpenAIOAuth(): Promise<void> {
+  await deleteCredential(ACCOUNT_OPENAI_OAUTH_ACCESS);
+  await deleteCredential(ACCOUNT_OPENAI_OAUTH_REFRESH);
+  await deleteCredential(ACCOUNT_OPENAI_OAUTH_EXPIRES);
 }
 
 // ---------------------------------------------------------------------------
