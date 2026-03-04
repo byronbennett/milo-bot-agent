@@ -483,33 +483,50 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
       // Extract final assistant text
       const messages = agent!.state.messages;
       log(`Agent has ${messages.length} messages after prompt`);
-      const lastAssistant = [...messages].reverse().find((m) => 'role' in m && (m as any).role === 'assistant');
-      let output = '';
-      if (lastAssistant && 'content' in lastAssistant) {
-        if (typeof lastAssistant.content === 'string') {
-          output = lastAssistant.content;
-        } else if (Array.isArray(lastAssistant.content)) {
-          output = (lastAssistant.content as any[])
-            .filter((b) => b.type === 'text')
-            .map((b) => b.text)
-            .join('\n');
-        }
-      }
+      const lastAssistant = [...messages].reverse().find((m) => 'role' in m && (m as any).role === 'assistant') as any;
 
-      if (!output) {
-        log(`WARNING: No assistant output extracted. lastAssistant=${lastAssistant ? JSON.stringify(lastAssistant).slice(0, 500) : 'null'}`);
+      // Check for API-level errors (e.g. unsupported model, auth failures)
+      if (lastAssistant?.stopReason === 'error' && lastAssistant?.errorMessage) {
+        const errorMsg = typeof lastAssistant.errorMessage === 'string'
+          ? lastAssistant.errorMessage
+          : JSON.stringify(lastAssistant.errorMessage);
+        log(`API error in assistant response: ${errorMsg}`);
+        send({
+          type: 'WORKER_TASK_DONE',
+          taskId: msg.taskId,
+          sessionId,
+          success: false,
+          error: errorMsg,
+          contextSize: getContextSize(),
+        });
       } else {
-        log(`Output (${output.length} chars): "${output.slice(0, 200)}"`);
-      }
+        let output = '';
+        if (lastAssistant && 'content' in lastAssistant) {
+          if (typeof lastAssistant.content === 'string') {
+            output = lastAssistant.content;
+          } else if (Array.isArray(lastAssistant.content)) {
+            output = (lastAssistant.content as any[])
+              .filter((b) => b.type === 'text')
+              .map((b) => b.text)
+              .join('\n');
+          }
+        }
 
-      send({
-        type: 'WORKER_TASK_DONE',
-        taskId: msg.taskId,
-        sessionId,
-        success: true,
-        output: output || 'Task completed.',
-        contextSize: getContextSize(),
-      });
+        if (!output) {
+          log(`WARNING: No assistant output extracted. lastAssistant=${lastAssistant ? JSON.stringify(lastAssistant).slice(0, 500) : 'null'}`);
+        } else {
+          log(`Output (${output.length} chars): "${output.slice(0, 200)}"`);
+        }
+
+        send({
+          type: 'WORKER_TASK_DONE',
+          taskId: msg.taskId,
+          sessionId,
+          success: true,
+          output: output || 'Task completed.',
+          contextSize: getContextSize(),
+        });
+      }
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
