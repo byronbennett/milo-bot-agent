@@ -19,6 +19,7 @@ const ACCOUNT_MILO_KEY = 'api-key';
 const ACCOUNT_ANTHROPIC_KEY = 'anthropic-api-key';
 const ACCOUNT_OPENAI_KEY = 'openai-api-key';
 const ACCOUNT_GEMINI_KEY = 'gemini-api-key';
+const ACCOUNT_GROQ_KEY = 'groq-api-key';
 const ACCOUNT_ENCRYPTION_PASSWORD = 'encryption-password';
 const ACCOUNT_OPENAI_OAUTH_ACCESS = 'openai-oauth-access';
 const ACCOUNT_OPENAI_OAUTH_REFRESH = 'openai-oauth-refresh';
@@ -321,6 +322,22 @@ export async function loadGeminiKey(): Promise<string | null> {
 
 export async function deleteGeminiKey(): Promise<void> {
   return deleteCredential(ACCOUNT_GEMINI_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// GROQ_API_KEY helpers
+// ---------------------------------------------------------------------------
+
+export async function saveGroqKey(key: string): Promise<void> {
+  return saveCredential(ACCOUNT_GROQ_KEY, key);
+}
+
+export async function loadGroqKey(): Promise<string | null> {
+  return loadCredential(ACCOUNT_GROQ_KEY);
+}
+
+export async function deleteGroqKey(): Promise<void> {
+  return deleteCredential(ACCOUNT_GROQ_KEY);
 }
 
 // ---------------------------------------------------------------------------

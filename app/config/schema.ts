@@ -103,6 +103,10 @@ export const openaiConfigSchema = z.object({
   authMethod: z.enum(['codex-login', 'api-key', 'none']).default('none'),
 });
 
+export const groqConfigSchema = z.object({
+  authMethod: z.enum(['api-key', 'none']).default('none'),
+});
+
 export const agentConfigSchema = z.object({
   agentName: z.string().min(1).max(100),
   agentId: z.string().optional(),
@@ -124,6 +128,7 @@ export const agentConfigSchema = z.object({
   onboardingComplete: z.boolean().default(false),
   encryption: encryptionConfigSchema.default({ level: 1 }),
   openai: openaiConfigSchema.default({}),
+  groq: groqConfigSchema.default({}),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
@@ -138,3 +143,4 @@ export type UpdateConfig = z.infer<typeof updateConfigSchema>;
 export type LocalModelsConfig = z.infer<typeof localModelsConfigSchema>;
 export type EncryptionConfig = z.infer<typeof encryptionConfigSchema>;
 export type OpenAIConfig = z.infer<typeof openaiConfigSchema>;
+export type GroqConfig = z.infer<typeof groqConfigSchema>;

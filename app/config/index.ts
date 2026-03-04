@@ -3,7 +3,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { agentConfigSchema, type AgentConfig } from './schema';
 import { defaultConfig, getDefaultConfigPath } from './defaults';
-import { loadApiKey, loadAnthropicKey, loadOpenAIKey, loadGeminiKey } from '../utils/keychain';
+import { loadApiKey, loadAnthropicKey, loadOpenAIKey, loadGeminiKey, loadGroqKey } from '../utils/keychain';
 import { initUtilityModel } from '../utils/ai-client';
 
 export type { AgentConfig } from './schema';
@@ -83,6 +83,10 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
         ...defaultConfig.openai,
         ...rawConfig.openai,
       },
+      groq: {
+        ...defaultConfig.groq,
+        ...rawConfig.groq,
+      },
     });
 
     // Propagate top-level ai.model to ai.agent.model when the user set
@@ -101,6 +105,9 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
           : 'openai';
       } else if (model.startsWith('gemini-')) {
         config.ai.agent.provider = 'google';
+      } else if (model.includes('/') && config.groq.authMethod === 'api-key') {
+        // Groq models use provider/model format (e.g. openai/gpt-oss-20b)
+        config.ai.agent.provider = 'groq';
       }
       // else keep default 'anthropic'
     }
@@ -150,6 +157,18 @@ export async function loadConfig(configPath?: string): Promise<AgentConfig> {
         const keychainKey = await loadGeminiKey();
         if (keychainKey) {
           process.env.GEMINI_API_KEY = keychainKey;
+        }
+      } catch {
+        // Keychain unavailable, continue without it
+      }
+    }
+
+    // If GROQ_API_KEY still not set, try the OS keychain
+    if (!process.env.GROQ_API_KEY) {
+      try {
+        const keychainKey = await loadGroqKey();
+        if (keychainKey) {
+          process.env.GROQ_API_KEY = keychainKey;
         }
       } catch {
         // Keychain unavailable, continue without it

@@ -13,6 +13,7 @@ import {
   saveAnthropicKey, loadAnthropicKey, deleteAnthropicKey,
   saveOpenAIKey, loadOpenAIKey, deleteOpenAIKey,
   saveGeminiKey, loadGeminiKey, deleteGeminiKey,
+  saveGroqKey, loadGroqKey, deleteGroqKey,
   saveEncryptionPassword,
   saveOpenAIOAuth,
   isKeychainAvailable,
@@ -34,6 +35,7 @@ const API_KEY_PATTERN = /^milo_[a-zA-Z0-9]+$/;
 const ANTHROPIC_KEY_PATTERN = /^sk-ant-[a-zA-Z0-9_-]+$/;
 const OPENAI_KEY_PATTERN = /^sk-/;
 const GEMINI_KEY_PATTERN = /^AIza/;
+const GROQ_KEY_PATTERN = /^gsk_/;
 
 const DEFAULT_AI_MODEL = 'claude-sonnet-4-6';
 
@@ -69,6 +71,14 @@ function validateGeminiKey(value: string): boolean | string {
   return true;
 }
 
+function validateGroqKey(value: string): boolean | string {
+  if (!value.trim()) return 'API key is required';
+  if (!GROQ_KEY_PATTERN.test(value.trim())) {
+    return 'Invalid Groq API key format. Keys start with "gsk_"';
+  }
+  return true;
+}
+
 function expandPath(path: string): string {
   return path.replace(/^~/, homedir());
 }
@@ -97,6 +107,8 @@ interface ExistingState {
   openaiKeySource: KeySource;
   geminiKey: string | null;
   geminiKeySource: KeySource;
+  groqKey: string | null;
+  groqKeySource: KeySource;
 }
 
 /**
@@ -112,6 +124,8 @@ async function loadExisting(dir: string): Promise<ExistingState> {
   let openaiKeySource: KeySource = null;
   let geminiKey: string | null = null;
   let geminiKeySource: KeySource = null;
+  let groqKey: string | null = null;
+  let groqKeySource: KeySource = null;
 
   const configPath = join(dir, 'config.json');
   if (existsSync(configPath)) {
@@ -163,6 +177,16 @@ async function loadExisting(dir: string): Promise<ExistingState> {
     // Keychain unavailable
   }
 
+  try {
+    const keychainKey = await loadGroqKey();
+    if (keychainKey) {
+      groqKey = keychainKey;
+      groqKeySource = 'keychain';
+    }
+  } catch {
+    // Keychain unavailable
+  }
+
   // Fall back to .env for any keys not found in keychain
   const envPath = join(dir, '.env');
   if (existsSync(envPath)) {
@@ -200,6 +224,14 @@ async function loadExisting(dir: string): Promise<ExistingState> {
           geminiKeySource = 'env';
         }
       }
+
+      if (!groqKey) {
+        const match = content.match(/^GROQ_API_KEY=(.+)$/m);
+        if (match && match[1].trim()) {
+          groqKey = match[1].trim();
+          groqKeySource = 'env';
+        }
+      }
     } catch {
       // Ignore read errors
     }
@@ -208,6 +240,7 @@ async function loadExisting(dir: string): Promise<ExistingState> {
   return {
     config, apiKey, apiKeySource, anthropicKey, anthropicKeySource,
     openaiKey, openaiKeySource, geminiKey, geminiKeySource,
+    groqKey, groqKeySource,
   };
 }
 
@@ -482,6 +515,7 @@ export async function runInit(options: {
   anthropicKey?: string;
   openaiKey?: string;
   geminiKey?: string;
+  groqKey?: string;
   aiModel?: string;
   dir?: string;
   name?: string;
@@ -518,6 +552,7 @@ export async function runInit(options: {
       anthropicKey: null, anthropicKeySource: null,
       openaiKey: null, openaiKeySource: null,
       geminiKey: null, geminiKeySource: null,
+      groqKey: null, groqKeySource: null,
     };
 
     if (isReinit) {
@@ -633,7 +668,7 @@ export async function runInit(options: {
     // -----------------------------------------------------------------------
     console.log('');
     console.log('🧠 AI Provider API Keys');
-    console.log('   MiloBot can use models from Anthropic, OpenAI, and Google.');
+    console.log('   MiloBot can use models from Anthropic, OpenAI, Google, and Groq.');
     console.log('   At least one provider key is needed for AI features (intent');
     console.log('   parsing, prompt enhancement, auto-answer, and agent tasks).');
     console.log('');
@@ -648,11 +683,13 @@ export async function runInit(options: {
     let anthropicKey: string | undefined;
     let openaiKey: string | undefined;
     let geminiKey: string | undefined;
+    let groqKey: string | undefined;
     let openaiAuthMethod: 'codex-login' | 'api-key' | 'none' = 'none';
+    let groqAuthMethod: 'api-key' | 'none' = 'none';
 
     // For new setups (no existing keys, no CLI flags), require explicit acceptance
-    const hasAnyExistingProviderKey = existing.anthropicKey || existing.openaiKey || existing.geminiKey;
-    const hasAnyCliProviderKey = options.anthropicKey || options.openaiKey || options.geminiKey;
+    const hasAnyExistingProviderKey = existing.anthropicKey || existing.openaiKey || existing.geminiKey || existing.groqKey;
+    const hasAnyCliProviderKey = options.anthropicKey || options.openaiKey || options.geminiKey || options.groqKey;
     let acceptedTerms = true;
     if (isInteractive && !hasAnyExistingProviderKey && !hasAnyCliProviderKey) {
       acceptedTerms = await confirm({
@@ -807,6 +844,28 @@ export async function runInit(options: {
         cliValue: options.geminiKey,
         required: false,
       });
+
+      // --- Groq ---
+      console.log('');
+      console.log('🔑 Groq API Key (optional)');
+      console.log('   Enables Groq models (GPT-OSS, Kimi K2) for agent tasks.');
+      console.log('   Get an API key: https://console.groq.com/keys');
+      console.log('');
+
+      groqKey = await promptForKey({
+        label: 'Groq API key',
+        existingKey: existing.groqKey,
+        existingSource: existing.groqKeySource,
+        validate: validateGroqKey,
+        save: saveGroqKey,
+        deleteFromKeychain: deleteGroqKey,
+        envName: 'GROQ_API_KEY',
+        resolvedDir,
+        isInteractive,
+        cliValue: options.groqKey,
+        required: false,
+      });
+      groqAuthMethod = groqKey ? 'api-key' : 'none';
     }
 
     // -----------------------------------------------------------------------
@@ -826,7 +885,15 @@ export async function runInit(options: {
       if (openaiAuthMethod !== 'none' || openaiKey) {
         modelChoices.push(
           { name: 'GPT-5.3 Codex (OpenAI)', value: 'gpt-5.3-codex' },
-          { name: 'GPT-5.3 Codex Spark (OpenAI, faster)', value: 'gpt-5.3-codex-spark' },
+          { name: `GPT-5.3 Codex Spark (OpenAI, faster${openaiAuthMethod === 'codex-login' ? ' — Pro only' : ''})`, value: 'gpt-5.3-codex-spark' },
+        );
+      }
+
+      if (groqAuthMethod !== 'none' || groqKey) {
+        modelChoices.push(
+          { name: 'GPT-OSS 20B (Groq, fast)', value: 'openai/gpt-oss-20b' },
+          { name: 'GPT-OSS 120B (Groq, capable)', value: 'openai/gpt-oss-120b' },
+          { name: 'Kimi K2 Instruct (Groq)', value: 'moonshotai/kimi-k2-instruct-0905' },
         );
       }
 
@@ -1119,6 +1186,9 @@ dist/
       openai: {
         authMethod: openaiAuthMethod,
       },
+      groq: {
+        authMethod: groqAuthMethod,
+      },
       messaging: {
         activeAdapter: 'webapp',
         webapp: {
@@ -1179,6 +1249,16 @@ dist/
         envName: 'GEMINI_API_KEY',
         resolvedDir,
         label: 'Gemini API key',
+      });
+    }
+
+    if (groqKey) {
+      await saveSecret({
+        key: groqKey,
+        save: saveGroqKey,
+        envName: 'GROQ_API_KEY',
+        resolvedDir,
+        label: 'Groq API key',
       });
     }
 
@@ -1249,6 +1329,7 @@ export const initCommand = new Command('init')
   .option('--anthropic-key <key>', 'Anthropic API key for Milo AI features')
   .option('--openai-key <key>', 'OpenAI API key (enables GPT models)')
   .option('--gemini-key <key>', 'Gemini API key (enables Google Gemini models)')
+  .option('--groq-key <key>', 'Groq API key (enables Groq models)')
   .option('--ai-model <model>', 'Model for Milo AI calls (not Claude Code)')
   .option('-d, --dir <directory>', 'Workspace directory')
   .option('-n, --name <name>', 'Agent name')

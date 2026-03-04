@@ -123,6 +123,9 @@ export const defaultConfig: AgentConfig = {
   openai: {
     authMethod: 'none',
   },
+  groq: {
+    authMethod: 'none',
+  },
 };
 
 /**
