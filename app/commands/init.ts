@@ -534,11 +534,37 @@ export async function runInit(options: {
     if (options.dir) {
       workspaceDir = expandPath(options.dir);
     } else if (isInteractive) {
-      const dirInput = await input({
-        message: 'Where should I create your workspace?',
-        default: '~/milo-workspace',
+      const workspaceName = await input({
+        message: 'What should the workspace folder be called?',
+        default: 'milo-workspace',
+        validate: (v) => v.trim() ? true : 'Workspace name is required',
       });
-      workspaceDir = expandPath(dirInput);
+
+      const home = homedir();
+      const documentsDir = join(home, 'Documents');
+      const parentChoices: { name: string; value: string }[] = [
+        { name: `Home folder (${home})`, value: home },
+      ];
+      if (existsSync(documentsDir)) {
+        parentChoices.push({ name: `Documents folder (${documentsDir})`, value: documentsDir });
+      }
+      parentChoices.push({ name: 'Custom path...', value: '__custom__' });
+
+      let parentDir = await select({
+        message: 'Where should I create it?',
+        choices: parentChoices,
+        default: home,
+      });
+
+      if (parentDir === '__custom__') {
+        const customPath = await input({
+          message: 'Enter the parent folder path:',
+          validate: (v) => v.trim() ? true : 'Path is required',
+        });
+        parentDir = expandPath(customPath.trim());
+      }
+
+      workspaceDir = join(parentDir, workspaceName.trim());
     } else {
       workspaceDir = expandPath('~/milo-workspace');
     }
