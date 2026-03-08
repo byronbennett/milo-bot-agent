@@ -17,6 +17,7 @@ import { sendIPC } from './ipc.js';
 import type {
   OrchestratorToWorker,
   WorkerToOrchestrator,
+  WorkerType,
 } from './ipc-types.js';
 import type {
   SessionActor,
@@ -28,6 +29,7 @@ import { Logger } from '../utils/logger.js';
 export interface SessionActorManagerOptions {
   workspaceDir: string;
   workerScript: string;
+  codexWorkerScript?: string;
   agentProvider?: string;
   agentModel?: string;
   utilityProvider?: string;
@@ -61,6 +63,8 @@ export class SessionActorManager {
     sessionName: string;
     sessionType: 'chat' | 'bot';
     projectPath: string;
+    workerType?: WorkerType;
+    codexThreadId?: string;
   }): Promise<SessionActor> {
     let actor = this.actors.get(sessionId);
 
@@ -69,12 +73,14 @@ export class SessionActorManager {
         sessionId,
         sessionName: meta.sessionName,
         sessionType: meta.sessionType,
+        workerType: meta.workerType ?? 'pi-agent',
         status: 'OPEN_IDLE',
         worker: null,
         currentTask: null,
         queueHigh: [],
         queueNormal: [],
         projectPath: meta.projectPath,
+        codexThreadId: meta.codexThreadId,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -214,13 +220,21 @@ export class SessionActorManager {
   /**
    * Steer a running task with additional user input.
    */
-  steer(sessionId: string, prompt: string): void {
+  steer(sessionId: string, prompt: string): boolean {
     const actor = this.actors.get(sessionId);
     if (!actor || !actor.worker || actor.worker.state !== 'busy') {
       this.logger.warn(`Cannot steer session ${sessionId}: not busy`);
-      return;
+      return false;
     }
+
+    // Codex workers don't support mid-turn steering — caller should queue instead
+    if (actor.workerType === 'codex') {
+      this.logger.verbose(`Codex session ${sessionId}: steering not supported, message will be queued`);
+      return false;
+    }
+
     this.sendToWorkerInternal(actor, { type: 'WORKER_STEER', prompt });
+    return true;
   }
 
   /**
@@ -273,9 +287,12 @@ export class SessionActorManager {
   }
 
   private async spawnWorker(actor: SessionActor): Promise<void> {
-    this.logger.info(`Spawning worker for session ${actor.sessionId}`);
+    const workerScript = actor.workerType === 'codex' && this.options.codexWorkerScript
+      ? this.options.codexWorkerScript
+      : this.options.workerScript;
+    this.logger.info(`Spawning ${actor.workerType} worker for session ${actor.sessionId}`);
 
-    const child = fork(this.options.workerScript, [], {
+    const child = fork(workerScript, [], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       env: {
         ...process.env,
@@ -311,11 +328,13 @@ export class SessionActorManager {
     // Send WORKER_INIT
     sendIPC(child.stdin!, {
       type: 'WORKER_INIT',
+      workerType: actor.workerType,
       sessionId: actor.sessionId,
       sessionName: actor.sessionName,
       sessionType: actor.sessionType,
       projectPath: actor.projectPath,
       workspaceDir: this.options.workspaceDir,
+      codexThreadId: actor.codexThreadId,
       config: {
         agentProvider: this.options.agentProvider,
         agentModel: this.options.agentModel,
@@ -420,6 +439,10 @@ export class SessionActorManager {
 
       case 'WORKER_QUESTION':
         actor.status = 'OPEN_WAITING_USER';
+        break;
+
+      case 'WORKER_CODEX_THREAD':
+        actor.codexThreadId = msg.threadId;
         break;
 
       case 'WORKER_CONTEXT_CLEARED':

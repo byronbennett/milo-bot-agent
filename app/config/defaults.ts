@@ -126,6 +126,10 @@ export const defaultConfig: AgentConfig = {
   groq: {
     authMethod: 'none',
   },
+  codex: {
+    defaultModel: 'gpt-5.3-codex',
+    timeoutMs: 30 * 60 * 1000,
+  },
 };
 
 /**

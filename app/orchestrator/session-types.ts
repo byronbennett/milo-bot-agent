@@ -3,6 +3,8 @@
  * Each active session is represented by a SessionActor managed by the orchestrator.
  */
 
+import type { WorkerType } from './ipc-types.js';
+
 export type SessionStatus =
   | 'OPEN_IDLE'
   | 'OPEN_RUNNING'
@@ -57,12 +59,15 @@ export interface SessionActor {
   sessionId: string;
   sessionName: string;
   sessionType: 'chat' | 'bot';
+  workerType: WorkerType;
   status: SessionStatus;
   worker: WorkerHandle | null;
   currentTask: CurrentTask | null;
   queueHigh: WorkItem[];
   queueNormal: WorkItem[];
   projectPath: string;
+  /** Codex CLI thread ID for resuming conversations across turns/restarts. */
+  codexThreadId?: string;
   createdAt: Date;
   updatedAt: Date;
 }

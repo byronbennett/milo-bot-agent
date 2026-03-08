@@ -26,6 +26,8 @@ export interface CodexArgs {
   cwd: string;
   sessionId?: string;
   model?: string;
+  /** Persona instructions to prepend to the first-turn prompt. */
+  instructions?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,17 @@ export function resetBinaryCache(): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Build the effective prompt, prepending persona instructions on the first turn.
+ * On resume turns the instructions are already part of the thread context.
+ */
+export function buildEffectivePrompt(opts: Pick<CodexArgs, 'prompt' | 'instructions' | 'sessionId'>): string {
+  if (opts.instructions && !opts.sessionId) {
+    return `${opts.instructions}\n\n---\n\n${opts.prompt}`;
+  }
+  return opts.prompt;
+}
+
+/**
  * Build the CLI argument array for a `codex` invocation.
  *
  * New session:
@@ -96,7 +109,8 @@ export function resetBinaryCache(): void {
  *   codex -a never -s workspace-write -C <cwd> [-m model] exec --json --skip-git-repo-check resume <sessionId> <prompt>
  */
 export function buildCodexArgs(opts: CodexArgs): string[] {
-  const { prompt, cwd, sessionId, model } = opts;
+  const { cwd, sessionId, model } = opts;
+  const effectivePrompt = buildEffectivePrompt(opts);
 
   const modelArgs = model ? ['-m', model] : [];
 
@@ -107,7 +121,7 @@ export function buildCodexArgs(opts: CodexArgs): string[] {
       '-C', cwd,
       ...modelArgs,
       'exec', '--json', '--skip-git-repo-check',
-      'resume', sessionId, prompt,
+      'resume', sessionId, effectivePrompt,
     ];
   }
 
@@ -117,7 +131,7 @@ export function buildCodexArgs(opts: CodexArgs): string[] {
     '-C', cwd,
     ...modelArgs,
     'exec', '--json', '--skip-git-repo-check',
-    prompt,
+    effectivePrompt,
   ];
 }
 

@@ -34,6 +34,7 @@ import {
   getConfirmedProject,
   getConfirmedProjects,
   insertSessionMessage,
+  updateCodexThreadId,
 } from '../db/sessions-db.js';
 import { SessionActorManager } from './session-actor.js';
 import { getPackageRoot, detectInstallMethod, getCurrentVersion, getLatestVersion, spawnUpdateDaemon, UPDATE_CHECK_INTERVAL_MS, type InstallMethod } from './updater.js';
@@ -162,9 +163,11 @@ export class Orchestrator {
 
     // 2. Create session actor manager
     const workerScript = join(__dirname, '..', 'orchestrator', 'worker.js');
+    const codexWorkerScript = join(__dirname, '..', 'orchestrator', 'codex-worker.js');
     this.actorManager = new SessionActorManager({
       workspaceDir: this.config.workspace.baseDir,
       workerScript,
+      codexWorkerScript,
       agentProvider: this.config.ai.agent.provider,
       agentModel: this.config.ai.agent.model,
       utilityProvider: this.config.ai.utility.provider,
@@ -927,13 +930,17 @@ export class Orchestrator {
       sessionName: message.sessionName ?? message.sessionId,
       sessionType: (message.sessionType as 'chat' | 'bot') || 'bot',
       projectPath,
+      workerType: message.workerType ?? 'pi-agent',
     });
 
     // If the actor is busy with a task and this is a normal message, steer instead of queue
+    // Codex workers don't support steering — steer() returns false, so we fall through to queueing
     if (workItemType === 'USER_MESSAGE' && actor.status === 'OPEN_RUNNING') {
-      this.actorManager.steer(message.sessionId, message.content);
-      this.logger.verbose(`Steered running session ${message.sessionId}`);
-      return;
+      if (this.actorManager.steer(message.sessionId, message.content)) {
+        this.logger.verbose(`Steered running session ${message.sessionId}`);
+        return;
+      }
+      // Steering not supported (e.g. Codex worker) — fall through to queue
     }
 
     // If the actor is waiting for an answer and this is a normal message, answer
@@ -1228,6 +1235,13 @@ export class Orchestrator {
           this.logger.warn('Failed to persist refreshed OAuth tokens:', err);
         });
         this.logger.verbose('OpenAI OAuth tokens refreshed and persisted');
+        break;
+      }
+
+      case 'WORKER_CODEX_THREAD': {
+        // Persist the Codex thread ID so it survives worker restarts
+        updateCodexThreadId(this.db, sessionId, event.threadId);
+        this.logger.verbose(`Codex thread ID for session ${sessionId}: ${event.threadId}`);
         break;
       }
 

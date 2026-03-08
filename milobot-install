@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+#
+# milobot-install — One-command setup for MiloBot Agent
+#
+# Usage:
+#   git clone <repo> && cd milo-bot-agent && ./milobot-install
+#
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+step()    { printf "\n${CYAN}▸${NC} ${BOLD}%s${NC}\n" "$*"; }
+ok()      { printf "  ${GREEN}✔${NC} %s\n" "$*"; }
+warn()    { printf "  ${YELLOW}⚠${NC}  %s\n" "$*"; }
+fail()    { printf "  ${RED}✖${NC} %s\n" "$*"; exit 1; }
+info()    { printf "  ${DIM}%s${NC}\n" "$*"; }
+
+MIN_NODE=20
+
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "$OS" in
+  Darwin) PLATFORM="macos" ;;
+  Linux)  PLATFORM="linux" ;;
+  *)      fail "Unsupported OS: $OS. MiloBot supports macOS and Linux." ;;
+esac
+
+# ---------------------------------------------------------------------------
+# PATH helpers
+# ---------------------------------------------------------------------------
+ensure_in_path() {
+  local dir="$1"
+  [[ -z "$dir" ]] && return
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *) export PATH="$dir:$PATH" ;;
+  esac
+}
+
+# Source shell profile so freshly-installed tools are available
+reload_shell_env() {
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile"; do
+    # shellcheck disable=SC1090
+    [[ -f "$rc" ]] && source "$rc" 2>/dev/null || true
+  done
+}
+
+# ---------------------------------------------------------------------------
+# 1. Node.js
+# ---------------------------------------------------------------------------
+node_version_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  local major
+  major="$(node -v | sed 's/^v//' | cut -d. -f1)"
+  [[ "$major" -ge "$MIN_NODE" ]]
+}
+
+load_nvm() {
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  # shellcheck disable=SC1091
+  [[ -s "$NVM_DIR/nvm.sh" ]] && source "$NVM_DIR/nvm.sh"
+}
+
+install_node() {
+  step "Installing Node.js (v${MIN_NODE}+)"
+
+  # Already have nvm?
+  load_nvm
+  if command -v nvm >/dev/null 2>&1; then
+    info "nvm detected — installing Node $MIN_NODE"
+    nvm install "$MIN_NODE"
+    nvm use "$MIN_NODE"
+    ok "Node $(node -v) installed via nvm"
+    return
+  fi
+
+  # Have fnm?
+  if command -v fnm >/dev/null 2>&1; then
+    info "fnm detected — installing Node $MIN_NODE"
+    fnm install "$MIN_NODE"
+    fnm use "$MIN_NODE"
+    ok "Node $(node -v) installed via fnm"
+    return
+  fi
+
+  # Have Homebrew on macOS?
+  if [[ "$PLATFORM" == "macos" ]] && command -v brew >/dev/null 2>&1; then
+    info "Installing Node via Homebrew"
+    brew install node@"$MIN_NODE"
+    brew link --overwrite node@"$MIN_NODE" 2>/dev/null || true
+    ok "Node $(node -v) installed via Homebrew"
+    return
+  fi
+
+  # Fallback: install nvm then Node
+  info "Installing nvm..."
+  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+  load_nvm
+  if ! command -v nvm >/dev/null 2>&1; then
+    fail "nvm installed but not available in this shell. Close and reopen your terminal, then re-run ./milobot-install"
+  fi
+  nvm install "$MIN_NODE"
+  nvm use "$MIN_NODE"
+  ok "Node $(node -v) installed via nvm"
+}
+
+ensure_node() {
+  step "Checking Node.js"
+  if node_version_ok; then
+    ok "Node $(node -v) found"
+    return
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    warn "Node $(node -v) found but v${MIN_NODE}+ required"
+  else
+    warn "Node.js not found"
+  fi
+
+  install_node
+
+  if ! node_version_ok; then
+    fail "Could not install Node.js v${MIN_NODE}+. Install it manually and re-run ./milobot-install"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 2. pnpm
+# ---------------------------------------------------------------------------
+install_pnpm() {
+  step "Installing pnpm"
+
+  # corepack (ships with Node 16.9+)
+  if command -v corepack >/dev/null 2>&1; then
+    info "Enabling pnpm via corepack"
+    corepack enable pnpm 2>/dev/null || true
+    corepack prepare pnpm@latest --activate 2>/dev/null || true
+    if command -v pnpm >/dev/null 2>&1; then
+      ok "pnpm $(pnpm -v) enabled via corepack"
+      return
+    fi
+  fi
+
+  # npm fallback
+  if command -v npm >/dev/null 2>&1; then
+    info "Installing pnpm via npm"
+    npm install -g pnpm
+    if command -v pnpm >/dev/null 2>&1; then
+      ok "pnpm $(pnpm -v) installed via npm"
+      return
+    fi
+  fi
+
+  # Standalone install script
+  info "Installing pnpm via standalone script"
+  curl -fsSL https://get.pnpm.io/install.sh | sh -
+  reload_shell_env
+  ensure_in_path "${PNPM_HOME:-$HOME/.local/share/pnpm}"
+
+  if ! command -v pnpm >/dev/null 2>&1; then
+    fail "Could not install pnpm. Install it manually (https://pnpm.io/installation) and re-run ./milobot-install"
+  fi
+  ok "pnpm $(pnpm -v) installed"
+}
+
+ensure_pnpm() {
+  step "Checking pnpm"
+  if command -v pnpm >/dev/null 2>&1; then
+    ok "pnpm $(pnpm -v) found"
+    return
+  fi
+  warn "pnpm not found"
+  install_pnpm
+}
+
+# ---------------------------------------------------------------------------
+# 3. pnpm global bin directory
+# ---------------------------------------------------------------------------
+detect_default_pnpm_home() {
+  case "$PLATFORM" in
+    macos) echo "$HOME/Library/pnpm" ;;
+    *)     echo "$HOME/.local/share/pnpm" ;;
+  esac
+}
+
+configure_pnpm_globals() {
+  local pnpm_home="$1"
+  mkdir -p "$pnpm_home" "$pnpm_home/global"
+  export PNPM_HOME="$pnpm_home"
+  ensure_in_path "$PNPM_HOME"
+  pnpm config set global-bin-dir "$PNPM_HOME" --global >/dev/null 2>&1 || true
+  pnpm config set global-dir "$PNPM_HOME/global" --global >/dev/null 2>&1 || true
+}
+
+ensure_pnpm_global_bin() {
+  step "Configuring pnpm global bin directory"
+
+  local global_bin
+  global_bin="$(pnpm bin --global 2>/dev/null || true)"
+
+  if [[ -z "$global_bin" ]]; then
+    pnpm setup >/dev/null 2>&1 || true
+    global_bin="$(pnpm bin --global 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$global_bin" ]]; then
+    configure_pnpm_globals "${PNPM_HOME:-$(detect_default_pnpm_home)}"
+    global_bin="$(pnpm bin --global 2>/dev/null || true)"
+    global_bin="${global_bin:-$PNPM_HOME}"
+  else
+    export PNPM_HOME="${PNPM_HOME:-$global_bin}"
+  fi
+
+  ensure_in_path "$global_bin"
+
+  if [[ -z "$global_bin" ]]; then
+    fail "Unable to determine pnpm global bin directory"
+  fi
+
+  ok "Global bin: $global_bin"
+}
+
+# ---------------------------------------------------------------------------
+# 4. Install dependencies
+# ---------------------------------------------------------------------------
+install_deps() {
+  step "Installing dependencies"
+  pnpm install
+  ok "Dependencies installed"
+}
+
+# ---------------------------------------------------------------------------
+# 5. Build
+# ---------------------------------------------------------------------------
+build_cli() {
+  step "Building CLI"
+  pnpm build
+  ok "Build complete"
+}
+
+# ---------------------------------------------------------------------------
+# 6. Link CLI globally
+# ---------------------------------------------------------------------------
+create_fallback_link() {
+  local source_bin="$PWD/dist/bin/milo.js"
+  local target_home="${PNPM_HOME:-$(detect_default_pnpm_home)}"
+  local target_bin="$target_home/milo"
+
+  mkdir -p "$target_home"
+  chmod +x "$source_bin"
+  ln -sf "$source_bin" "$target_bin"
+  ensure_in_path "$target_home"
+  ok "Created direct symlink at $target_bin"
+}
+
+link_cli() {
+  step "Linking 'milo' command globally"
+
+  local output=""
+  local status=0
+
+  set +e
+  output="$(pnpm link --global 2>&1)"
+  status=$?
+  set -e
+
+  if [[ $status -eq 0 ]]; then
+    ok "'milo' linked globally via pnpm"
+    return
+  fi
+
+  # Retry after repairing pnpm config
+  if [[ "$output" == *"ERR_PNPM_NO_GLOBAL_BIN_DIR"* ]]; then
+    warn "Repairing pnpm global config and retrying..."
+    configure_pnpm_globals "${PNPM_HOME:-$(detect_default_pnpm_home)}"
+    pnpm setup >/dev/null 2>&1 || true
+
+    set +e
+    output="$(pnpm link --global 2>&1)"
+    status=$?
+    set -e
+
+    if [[ $status -eq 0 ]]; then
+      ok "'milo' linked globally via pnpm"
+      return
+    fi
+  fi
+
+  # Final fallback: direct symlink
+  warn "pnpm link failed — creating direct symlink instead"
+  create_fallback_link
+}
+
+# ---------------------------------------------------------------------------
+# 7. Verify and launch init
+# ---------------------------------------------------------------------------
+verify_and_init() {
+  step "Verifying installation"
+
+  if command -v milo >/dev/null 2>&1; then
+    ok "'milo' command is available at $(command -v milo)"
+  else
+    # PATH may not be updated in this shell yet — try pnpm exec
+    warn "'milo' not yet in PATH (restart your terminal to fix)"
+    info "Running initial setup via pnpm exec..."
+    printf "\n"
+    exec pnpm exec milo init
+  fi
+
+  printf "\n"
+  printf "${GREEN}${BOLD}Installation complete!${NC}\n"
+  printf "${DIM}Available commands: milo start | milo stop | milo status | milo sessions | milo logs${NC}\n"
+  printf "\n"
+
+  # Launch interactive config
+  exec milo init
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  printf "\n"
+  printf "${BOLD}🤖 MiloBot Agent Installer${NC}\n"
+  printf "${DIM}─────────────────────────${NC}\n"
+  printf "  Platform: ${PLATFORM} (${ARCH})\n"
+
+  ensure_node
+  ensure_pnpm
+  ensure_pnpm_global_bin
+  install_deps
+  build_cli
+  link_cli
+  verify_and_init
+}
+
+main "$@"

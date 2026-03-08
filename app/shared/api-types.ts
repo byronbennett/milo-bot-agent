@@ -50,6 +50,8 @@ export interface PendingMessage {
   personaId?: string;
   personaVersionId?: string;
   model?: string;
+  /** Worker type for this session (pi-agent or codex). Defaults to pi-agent. */
+  workerType?: 'pi-agent' | 'codex';
   createdAt: string;
 }
 

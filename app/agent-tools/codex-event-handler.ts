@@ -59,15 +59,67 @@ export interface CodexEventState {
 // JSONL line parser
 // ---------------------------------------------------------------------------
 
+/** Map of snake_case → camelCase for item type strings. */
+const ITEM_TYPE_MAP: Record<string, string> = {
+  agent_message: 'agentMessage',
+  command_execution: 'commandExecution',
+  file_change: 'fileChange',
+};
+
+/** Map of snake_case → camelCase for status strings. */
+const STATUS_MAP: Record<string, string> = {
+  in_progress: 'inProgress',
+};
+
+/**
+ * Map of snake_case → camelCase for top-level event type strings.
+ * Codex CLI may emit either `item.agent_message.delta` or
+ * `item.agentMessage.delta` depending on version.
+ */
+const EVENT_TYPE_MAP: Record<string, string> = {
+  'item.agent_message.delta': 'item.agentMessage.delta',
+  'item.command_execution.outputDelta': 'item.commandExecution.outputDelta',
+  'item.command_execution.output_delta': 'item.commandExecution.outputDelta',
+  'item.file_change.outputDelta': 'item.fileChange.outputDelta',
+  'item.file_change.output_delta': 'item.fileChange.outputDelta',
+  'item.reasoning.summary_text_delta': 'item.reasoning.summaryTextDelta',
+};
+
+/**
+ * Normalize a raw parsed event so that both snake_case and camelCase
+ * Codex CLI output is handled uniformly by the rest of the handler.
+ */
+function normalizeCodexEvent(raw: Record<string, unknown>): Record<string, unknown> {
+  // Normalize top-level event type
+  if (typeof raw.type === 'string' && raw.type in EVENT_TYPE_MAP) {
+    raw.type = EVENT_TYPE_MAP[raw.type];
+  }
+
+  // Normalize item.type and item.status for item.started / item.completed events
+  const item = raw.item as Record<string, unknown> | undefined;
+  if (item && typeof item === 'object') {
+    if (typeof item.type === 'string' && item.type in ITEM_TYPE_MAP) {
+      item.type = ITEM_TYPE_MAP[item.type];
+    }
+    if (typeof item.status === 'string' && item.status in STATUS_MAP) {
+      item.status = STATUS_MAP[item.status];
+    }
+  }
+
+  return raw;
+}
+
 /**
  * Parse a single JSONL line into a CodexEvent.
  * Returns `null` for empty lines or unparseable JSON.
+ * Normalizes snake_case event/item types to camelCase for compatibility.
  */
 export function parseCodexLine(line: string): CodexEvent | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
   try {
-    return JSON.parse(trimmed) as CodexEvent;
+    const raw = JSON.parse(trimmed) as Record<string, unknown>;
+    return normalizeCodexEvent(raw) as CodexEvent;
   } catch {
     return null;
   }

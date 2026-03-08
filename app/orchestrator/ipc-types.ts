@@ -12,13 +12,18 @@ export interface ContextSize {
 
 // --- Orchestrator → Worker ---
 
+export type WorkerType = 'pi-agent' | 'codex';
+
 export interface WorkerInitMessage {
   type: 'WORKER_INIT';
+  workerType: WorkerType;
   sessionId: string;
   sessionName: string;
   sessionType: 'chat' | 'bot';
   projectPath: string;
   workspaceDir: string;
+  /** Persisted Codex thread ID for resuming across worker restarts. */
+  codexThreadId?: string;
   config: {
     agentProvider?: string;
     agentModel?: string;
@@ -32,6 +37,8 @@ export interface WorkerInitMessage {
     personasDir: string;
     skillsDir: string;
     openaiOAuth?: { access: string; refresh: string; expires: number };
+    /** Codex-specific config. */
+    codex?: { defaultModel?: string; timeoutMs?: number };
   };
 }
 
@@ -235,6 +242,12 @@ export interface WorkerOAuthRefreshedMessage {
   credentials: { access: string; refresh: string; expires: number };
 }
 
+export interface WorkerCodexThreadMessage {
+  type: 'WORKER_CODEX_THREAD';
+  sessionId: string;
+  threadId: string;
+}
+
 export type WorkerToOrchestrator =
   | WorkerReadyMessage
   | WorkerTaskStartedMessage
@@ -251,7 +264,8 @@ export type WorkerToOrchestrator =
   | WorkerProjectSetMessage
   | WorkerContextClearedMessage
   | WorkerContextCompactedMessage
-  | WorkerOAuthRefreshedMessage;
+  | WorkerOAuthRefreshedMessage
+  | WorkerCodexThreadMessage;
 
 // Union of all IPC messages
 export type IPCMessage = OrchestratorToWorker | WorkerToOrchestrator;

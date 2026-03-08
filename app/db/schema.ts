@@ -82,4 +82,8 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE session_messages ADD COLUMN message_id TEXT`,
   // Add confirmed_project to sessions for persisting project selection across crashes
   `ALTER TABLE sessions ADD COLUMN confirmed_project TEXT`,
+  // Add worker_type to sessions for distinguishing pi-agent vs codex workers
+  `ALTER TABLE sessions ADD COLUMN worker_type TEXT DEFAULT 'pi-agent'`,
+  // Add codex_thread_id to sessions for persisting Codex thread across restarts
+  `ALTER TABLE sessions ADD COLUMN codex_thread_id TEXT`,
 ];

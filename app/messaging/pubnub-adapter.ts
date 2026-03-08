@@ -167,6 +167,7 @@ export class PubNubAdapter implements MessagingAdapter {
       personaId: cmd.personaId,
       personaVersionId: cmd.personaVersionId,
       model: cmd.model,
+      workerType: cmd.workerType,
       createdAt: cmd.timestamp,
     };
 

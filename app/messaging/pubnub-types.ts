@@ -18,6 +18,7 @@ export interface PubNubCommandMessage {
   personaId?: string;
   personaVersionId?: string;
   model?: string;
+  workerType?: 'pi-agent' | 'codex';
   timestamp: string;
 }
 

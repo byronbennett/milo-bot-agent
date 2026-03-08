@@ -4,6 +4,7 @@
 
 import type Database from 'better-sqlite3';
 import type { SessionStatus, WorkerState } from '../orchestrator/session-types.js';
+import type { WorkerType } from '../orchestrator/ipc-types.js';
 
 export interface SessionRecord {
   session_id: string;
@@ -14,6 +15,8 @@ export interface SessionRecord {
   worker_state?: string;
   current_task_id?: string;
   confirmed_project?: string;
+  worker_type?: string;
+  codex_thread_id?: string;
   created_at: string;
   updated_at: string;
   closed_at?: string;
@@ -97,4 +100,21 @@ export function getSessionMessages(db: Database.Database, sessionId: string, lim
   return db.prepare(`
     SELECT sender, content, created_at FROM session_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?
   `).all(sessionId, limit) as Array<{ sender: string; content: string; created_at: string }>;
+}
+
+export function updateWorkerType(db: Database.Database, sessionId: string, workerType: WorkerType): void {
+  db.prepare(`
+    UPDATE sessions SET worker_type = ?, updated_at = datetime('now') WHERE session_id = ?
+  `).run(workerType, sessionId);
+}
+
+export function updateCodexThreadId(db: Database.Database, sessionId: string, threadId: string | null): void {
+  db.prepare(`
+    UPDATE sessions SET codex_thread_id = ?, updated_at = datetime('now') WHERE session_id = ?
+  `).run(threadId, sessionId);
+}
+
+export function getCodexThreadId(db: Database.Database, sessionId: string): string | undefined {
+  const row = db.prepare(`SELECT codex_thread_id FROM sessions WHERE session_id = ?`).get(sessionId) as { codex_thread_id?: string } | undefined;
+  return row?.codex_thread_id ?? undefined;
 }
