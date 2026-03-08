@@ -32,6 +32,28 @@ Tool sets are configurable: `full`, `minimal` (no CLI agents), or `chat` (conver
 
 ## Installation
 
+### Option 1: One-Line Install (Recommended)
+
+Clone the repo and run the install script:
+
+```bash
+git clone https://github.com/your-org/milo-bot-agent.git
+cd milo-bot-agent
+./milobot-install
+```
+
+> **Note:** You must use `./milobot-install` (with the `./` prefix) since the script is in the current directory, not on your system PATH. This is standard Unix/macOS behavior for running local scripts.
+
+The install script will:
+- Install Node.js (via nvm, fnm, or Homebrew) if not already present
+- Install pnpm if not already present
+- Install all dependencies
+- Build the CLI
+- Link the `milo` command globally
+- Run `milo init` to set up your workspace
+
+### Option 2: npm / pnpm Global Install
+
 ```bash
 npm install -g milo-bot-agent
 ```
@@ -42,11 +64,13 @@ Or with pnpm:
 pnpm add -g milo-bot-agent
 ```
 
+Then run `milo init` to set up your workspace.
+
 ## Quick Start
 
 1. **Get an API Key** — Visit [milobot.dev/settings](https://www.milobot.dev/settings) and create a new agent.
 
-2. **Initialize**
+2. **Initialize** (skip if you used `./milobot-install` — it runs this automatically)
 
    ```bash
    milo init
