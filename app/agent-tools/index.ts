@@ -11,6 +11,7 @@ import { createCliAgentTools } from './cli-agent-tools.js';
 import { createBrowserTool } from './browser-tool.js';
 import { createWebFetchTool } from './web-fetch-tool.js';
 import { createSetProjectTool } from './project-tool.js';
+import { createSetupProjectTool } from './setup-project-tool.js';
 import { createFormTool, type FormToolContext } from './form-tool.js';
 import { createUsageTool } from './usage-tool.js';
 import { createSendFileTool } from './send-file-tool.js';
@@ -73,6 +74,7 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
       ctx.onProjectSet?.(projectName, newProjectPath, isNew);
     },
   });
+  const setupProjectTool = createSetupProjectTool(ctx);
   const formTools = ctx.requestForm ? [createFormTool({ requestForm: ctx.requestForm })] : [];
   const usageTools = ctx.requestForm
     ? [createUsageTool({ loadAdminKey: (name) => loadToolKey('usage', name), requestForm: ctx.requestForm })]
@@ -83,14 +85,14 @@ export function loadTools(toolSet: ToolSet, ctx: ToolContext): AgentTool<any>[] 
 
   switch (toolSet) {
     case 'full':
-      return [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, uiTools[0], createBrowserTool(), ...formTools, ...usageTools, ...sendFileTools];
+      return [...coreTools, createWebFetchTool(), setProjectTool, setupProjectTool, ...cliTools, uiTools[0], createBrowserTool(), ...formTools, ...usageTools, ...sendFileTools];
     case 'chat':
       return [...uiTools];
     case 'minimal':
-      return [...coreTools, createWebFetchTool(), setProjectTool, ...uiTools, ...formTools, ...usageTools, ...sendFileTools];
+      return [...coreTools, createWebFetchTool(), setProjectTool, setupProjectTool, ...uiTools, ...formTools, ...usageTools, ...sendFileTools];
     default:
       if (Array.isArray(toolSet)) {
-        const all = [...coreTools, createWebFetchTool(), setProjectTool, ...cliTools, ...uiTools, createBrowserTool(), ...formTools, ...usageTools, ...sendFileTools];
+        const all = [...coreTools, createWebFetchTool(), setProjectTool, setupProjectTool, ...cliTools, ...uiTools, createBrowserTool(), ...formTools, ...usageTools, ...sendFileTools];
         return all.filter((t) => toolSet.includes(t.name));
       }
       return [...coreTools, createWebFetchTool(), ...uiTools, ...formTools, ...usageTools, ...sendFileTools];

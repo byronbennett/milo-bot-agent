@@ -62,6 +62,44 @@ export interface AgentWithApiKey extends Agent {
 }
 
 // ============================================================================
+// Project Types
+// ============================================================================
+
+export interface Project {
+  id: string;
+  agentId: string;
+  personaId: string;
+  name: string;
+  description?: string;
+  projectFolder: string;
+  repoUrl?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ============================================================================
+// Kanban Task Types
+// ============================================================================
+
+export type KanbanColumn = 'planning' | 'ready' | 'in_progress' | 'test' | 'complete';
+
+export type KanbanTaskStatus = 'idle' | 'active' | 'paused' | 'blocked' | 'input_required' | 'canceled';
+
+export interface KanbanTask {
+  id: string;
+  projectId: string;
+  sessionId?: string;
+  title: string;
+  description?: string;
+  column: KanbanColumn;
+  status: KanbanTaskStatus;
+  statusText?: string;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ============================================================================
 // Session Types
 // ============================================================================
 
