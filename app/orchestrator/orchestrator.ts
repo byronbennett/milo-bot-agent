@@ -711,6 +711,8 @@ export class Orchestrator {
     await this.actorManager.closeSession(sessionId);
 
     // 2. Update session status in SQLite
+    // Ensure session row exists (it may only exist on the web, not locally)
+    upsertSession(this.db, { sessionId, sessionType: 'bot', status: 'CLOSED' });
     updateSessionStatus(this.db, sessionId, 'CLOSED');
     insertSessionMessage(this.db, sessionId, 'system', 'Session deleted by user');
 
