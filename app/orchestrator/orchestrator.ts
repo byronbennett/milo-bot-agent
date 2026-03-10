@@ -11,7 +11,8 @@
  * Replaces the old MiloAgent class.
  */
 
-import { existsSync, unlinkSync, mkdirSync, readdirSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, readdirSync, copyFileSync } from 'fs';
+import { execSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -418,6 +419,10 @@ export class Orchestrator {
           timestamp: new Date().toISOString(),
         });
       }
+    } else if (message.ui_action === 'list_projects') {
+      await this.handleListProjects(message as unknown as Record<string, unknown>);
+    } else if (message.ui_action === 'create_project') {
+      await this.handleCreateProject(message as unknown as Record<string, unknown>);
     } else if (message.ui_action === 'PING') {
       this.logger.info('Ping received from browser');
       if (this.pubnubAdapter) {
@@ -689,6 +694,125 @@ export class Orchestrator {
           type: 'ui_action_result',
           agentId: this.agentId,
           action: 'check_milo_agent_updates',
+          requestId: requestId ?? '',
+          success: false,
+          error: errorMsg,
+          timestamp: new Date().toISOString(),
+        } as unknown as import('../messaging/pubnub-types.js').PubNubEventMessage);
+      }
+    }
+  }
+
+  /**
+   * Handle list_projects: scan PROJECTS/ directory and return folder list.
+   */
+  private async handleListProjects(raw: Record<string, unknown>): Promise<void> {
+    const requestId = raw.requestId as string | undefined;
+    this.logger.info('list_projects requested');
+
+    try {
+      const projectsRoot = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
+      let projects: Array<{ name: string; folder: string }> = [];
+
+      if (existsSync(projectsRoot)) {
+        projects = readdirSync(projectsRoot, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+          .map((d) => ({ name: d.name, folder: join(projectsRoot, d.name) }));
+      }
+
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'list_projects_response',
+          agentId: this.agentId,
+          requestId: requestId ?? '',
+          projects,
+          success: true,
+          timestamp: new Date().toISOString(),
+        } as unknown as import('../messaging/pubnub-types.js').PubNubEventMessage);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error('list_projects failed:', errorMsg);
+
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'list_projects_response',
+          agentId: this.agentId,
+          requestId: requestId ?? '',
+          projects: [],
+          success: false,
+          error: errorMsg,
+          timestamp: new Date().toISOString(),
+        } as unknown as import('../messaging/pubnub-types.js').PubNubEventMessage);
+      }
+    }
+  }
+
+  /**
+   * Handle create_project: create directory, git init, copy CLAUDE.md template.
+   */
+  private async handleCreateProject(raw: Record<string, unknown>): Promise<void> {
+    const requestId = raw.requestId as string | undefined;
+    const name = raw.name as string;
+    const folder = raw.folder as string;
+    this.logger.info(`create_project requested: name=${name}, folder=${folder}`);
+
+    try {
+      const projectsRoot = join(this.config.workspace.baseDir, this.config.workspace.projectsDir);
+      const projectPath = join(projectsRoot, folder);
+
+      // Check if directory already exists
+      if (existsSync(projectPath)) {
+        if (this.pubnubAdapter) {
+          await this.pubnubAdapter.publishEvent({
+            type: 'create_project_response',
+            agentId: this.agentId,
+            requestId: requestId ?? '',
+            success: false,
+            error: `Folder "${folder}" already exists`,
+            timestamp: new Date().toISOString(),
+          } as unknown as import('../messaging/pubnub-types.js').PubNubEventMessage);
+        }
+        return;
+      }
+
+      // Create directory
+      mkdirSync(projectPath, { recursive: true });
+
+      // Initialize git repo
+      try {
+        execSync('git init', { cwd: projectPath, stdio: 'pipe' });
+      } catch {
+        // Non-fatal — project still usable without git
+      }
+
+      // Copy DEFAULT-CLAUDE.md template if it exists
+      const templatesDir = join(this.config.workspace.baseDir, this.config.workspace.templatesDir);
+      const defaultClaudeMd = join(templatesDir, 'DEFAULT-CLAUDE.md');
+      if (existsSync(defaultClaudeMd)) {
+        copyFileSync(defaultClaudeMd, join(projectPath, 'CLAUDE.md'));
+      }
+
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'create_project_response',
+          agentId: this.agentId,
+          requestId: requestId ?? '',
+          success: true,
+          project: { name, folder: projectPath },
+          timestamp: new Date().toISOString(),
+        } as unknown as import('../messaging/pubnub-types.js').PubNubEventMessage);
+      }
+
+      this.logger.info(`Project "${name}" created at ${projectPath}`);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error('create_project failed:', errorMsg);
+
+      if (this.pubnubAdapter) {
+        await this.pubnubAdapter.publishEvent({
+          type: 'create_project_response',
+          agentId: this.agentId,
           requestId: requestId ?? '',
           success: false,
           error: errorMsg,

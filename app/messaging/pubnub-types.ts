@@ -58,6 +58,8 @@ export type PubNubEventType =
   | 'file_send'
   | 'context_cleared'
   | 'context_compacted'
+  | 'list_projects_response'
+  | 'create_project_response'
   | 'error';
 
 export interface PubNubEventMessage {
@@ -115,6 +117,14 @@ export interface PubNubEventMessage {
     mimeType: string;
     sizeBytes: number;
   };
+  /** Project list for list_projects_response events */
+  projects?: Array<{ name: string; folder: string }>;
+  /** Created project info for create_project_response events */
+  project?: { name: string; folder: string };
+  /** Whether a project operation succeeded */
+  success?: boolean;
+  /** Error message for failed project operations */
+  error?: string | null;
   timestamp: string;
 }
 
@@ -140,6 +150,24 @@ export interface PubNubFormResponseCommand {
   formId: string;
   status: 'submitted' | 'cancelled';
   values?: Record<string, string | number | boolean>;
+  timestamp: string;
+}
+
+/** List projects command from browser (received on cmd channel) */
+export interface PubNubListProjectsCommand {
+  type: 'list_projects';
+  ui_action: 'list_projects';
+  requestId: string;
+  timestamp: string;
+}
+
+/** Create project command from browser (received on cmd channel) */
+export interface PubNubCreateProjectCommand {
+  type: 'create_project';
+  ui_action: 'create_project';
+  requestId: string;
+  name: string;
+  folder: string;
   timestamp: string;
 }
 
