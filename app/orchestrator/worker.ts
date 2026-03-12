@@ -27,6 +27,20 @@ import type {
 } from './ipc-types.js';
 import type { FormDefinition, FormResponse } from '../shared/form-types.js';
 import { sendNotification } from '../utils/notify.js';
+import {
+  initSessionLog,
+  updateSessionLogPath,
+  logUserMessage,
+  logSteerMessage,
+  logAIResponse,
+  logAIError,
+  logToolStart,
+  logToolEnd,
+  logQuestion,
+  logAnswer,
+  logCancelled,
+  logSessionClose,
+} from './session-log.js';
 
 const ORPHAN_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -107,6 +121,8 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
 
   initialized = true;
   log(`Initialized (project=${projectPath})`);
+
+  initSessionLog(projectPath, sessionName);
 
   send({ type: 'WORKER_READY', sessionId, pid: process.pid, contextSize: getContextSize() });
 }
@@ -240,6 +256,7 @@ When asked to research something (find YouTube channels, compare options, gather
     askUser: ({ toolCallId, question, options }) => {
       return new Promise<string>((resolve) => {
         pendingAnswers.set(toolCallId, resolve);
+        logQuestion(question);
         send({
           type: 'WORKER_QUESTION',
           sessionId,
@@ -389,6 +406,7 @@ When asked to research something (find YouTube channels, compare options, gather
         break;
 
       case 'tool_execution_start':
+        logToolStart(event.toolName, event.toolCallId);
         send({
           type: 'WORKER_TOOL_START',
           sessionId,
@@ -398,7 +416,11 @@ When asked to research something (find YouTube channels, compare options, gather
         });
         break;
 
-      case 'tool_execution_end':
+      case 'tool_execution_end': {
+        const toolSummary = typeof event.result?.content?.[0] === 'object' && event.result?.content?.[0]?.type === 'text'
+          ? event.result.content[0].text.slice(0, 200)
+          : undefined;
+        logToolEnd(event.toolName, !event.isError, toolSummary);
         send({
           type: 'WORKER_TOOL_END',
           sessionId,
@@ -406,11 +428,10 @@ When asked to research something (find YouTube channels, compare options, gather
           toolName: event.toolName,
           toolCallId: event.toolCallId,
           success: !event.isError,
-          summary: typeof event.result?.content?.[0] === 'object' && event.result?.content?.[0]?.type === 'text'
-            ? event.result.content[0].text.slice(0, 200)
-            : undefined,
+          summary: toolSummary,
         });
         break;
+      }
     }
   });
 
@@ -473,11 +494,13 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
     log(`  Model: ${currentModel ?? initConfig.agentModel ?? '(default)'}`);
     log(`  System prompt (${agent!.state.systemPrompt.length} chars):\n${agent!.state.systemPrompt}`);
     log(`  User prompt: ${msg.prompt}`);
+    logUserMessage(msg.prompt);
     await agent!.prompt(msg.prompt);
     const promptDuration = Date.now() - promptStart;
     log(`agent.prompt() completed in ${promptDuration}ms`);
 
     if (cancelRequested) {
+      logCancelled();
       send({ type: 'WORKER_TASK_CANCELLED', taskId: msg.taskId, sessionId });
     } else {
       // Extract final assistant text
@@ -491,6 +514,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
           ? lastAssistant.errorMessage
           : JSON.stringify(lastAssistant.errorMessage);
         log(`API error in assistant response: ${errorMsg}`);
+        logAIError(errorMsg);
         send({
           type: 'WORKER_TASK_DONE',
           taskId: msg.taskId,
@@ -518,6 +542,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
           log(`Output (${output.length} chars): "${output.slice(0, 200)}"`);
         }
 
+        logAIResponse(output || 'Task completed.');
         send({
           type: 'WORKER_TASK_DONE',
           taskId: msg.taskId,
@@ -533,8 +558,10 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
     log(`Task failed: ${error}`);
 
     if (cancelRequested) {
+      logCancelled();
       send({ type: 'WORKER_TASK_CANCELLED', taskId: msg.taskId, sessionId });
     } else {
+      logAIError(error);
       send({
         type: 'WORKER_TASK_DONE',
         taskId: msg.taskId,
@@ -563,6 +590,7 @@ async function handleCancel(_msg: WorkerCancelMessage): Promise<void> {
 function handleSteer(msg: WorkerSteerMessage): void {
   if (agent) {
     log(`Steering: ${msg.prompt.slice(0, 80)}...`);
+    logSteerMessage(msg.prompt);
     agent.steer({ role: 'user', content: msg.prompt, timestamp: Date.now() });
   }
 }
@@ -570,6 +598,7 @@ function handleSteer(msg: WorkerSteerMessage): void {
 function handleAnswer(msg: WorkerAnswerMessage): void {
   const resolver = pendingAnswers.get(msg.toolCallId);
   if (resolver) {
+    logAnswer(msg.answer);
     resolver(msg.answer);
     pendingAnswers.delete(msg.toolCallId);
   }
@@ -728,9 +757,11 @@ async function main(): Promise<void> {
       case 'WORKER_UPDATE_PROJECTS':
         projectPath = msg.primaryProjectPath;
         confirmedProjectPaths = msg.projectPaths;
+        updateSessionLogPath(msg.primaryProjectPath);
         log(`Projects updated: primary=${msg.primaryProjectPath}, all=[${msg.projectPaths.join(', ')}]`);
         break;
       case 'WORKER_CLOSE':
+        logSessionClose();
         log('Close requested, exiting...');
         process.exit(0);
         break;

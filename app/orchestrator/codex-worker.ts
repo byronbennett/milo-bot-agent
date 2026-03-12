@@ -39,6 +39,16 @@ import {
   type CodexEventState,
 } from '../agent-tools/codex-event-handler.js';
 import { sendNotification } from '../utils/notify.js';
+import {
+  initSessionLog,
+  logUserMessage,
+  logAIResponse,
+  logAIError,
+  logToolStart,
+  logToolEnd,
+  logCancelled,
+  logSessionClose,
+} from './session-log.js';
 
 // ---------------------------------------------------------------------------
 // Worker state
@@ -108,6 +118,7 @@ function sendIpcEvent(event: {
       break;
     case 'tool_start':
       if (event.toolName && event.toolCallId) {
+        logToolStart(event.toolName, event.toolCallId);
         send({
           type: 'WORKER_TOOL_START',
           sessionId,
@@ -119,6 +130,7 @@ function sendIpcEvent(event: {
       break;
     case 'tool_end':
       if (event.toolName && event.toolCallId) {
+        logToolEnd(event.toolName, event.success ?? true, event.summary);
         send({
           type: 'WORKER_TOOL_END',
           sessionId,
@@ -177,6 +189,8 @@ async function handleInit(msg: WorkerInitMessage): Promise<void> {
   initialized = true;
   log(`Initialized (project=${projectPath})`);
 
+  initSessionLog(projectPath, sessionName);
+
   send({
     type: 'WORKER_READY',
     sessionId,
@@ -230,6 +244,8 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
   log(`Task started: ${msg.taskId}`);
 
   try {
+    logUserMessage(msg.prompt);
+
     // Resolve persona instructions (only used on first turn of a thread)
     await resolvePersonaIfNeeded(msg.personaId, msg.personaVersionId);
 
@@ -345,6 +361,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
     const durationMs = Date.now() - startTime;
 
     if (cancelRequested) {
+      logCancelled();
       send({ type: 'WORKER_TASK_CANCELLED', taskId: msg.taskId, sessionId });
       return;
     }
@@ -353,10 +370,13 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
     let output: string;
     if (state.errors.length > 0 && !state.lastAssistantText) {
       output = `Codex CLI ended with errors: ${state.errors.join('; ')}`;
+      logAIError(output);
     } else if (state.lastAssistantText) {
       output = state.lastAssistantText;
+      logAIResponse(output);
     } else {
       output = 'Task completed (no text output from Codex).';
+      logAIResponse(output);
     }
 
     send({
@@ -372,8 +392,10 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
     log(`Task failed: ${error}`);
 
     if (cancelRequested) {
+      logCancelled();
       send({ type: 'WORKER_TASK_CANCELLED', taskId: msg.taskId, sessionId });
     } else {
+      logAIError(error);
       send({
         type: 'WORKER_TASK_DONE',
         taskId: msg.taskId,
@@ -490,6 +512,7 @@ async function main(): Promise<void> {
         });
         break;
       case 'WORKER_CLOSE':
+        logSessionClose();
         log('Close requested, exiting...');
         if (activeCodexProc) escalatingKill(activeCodexProc);
         process.exit(0);
