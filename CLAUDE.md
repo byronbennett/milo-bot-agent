@@ -57,7 +57,7 @@ ESM throughout (`"type": "module"`). TypeScript targets ES2022, bundled with tsu
 **Core modules:**
 1. `messaging/` — Adapter pattern: `WebAppAdapter` (REST polling) and `PubNubAdapter` (real-time pub/sub).
 2. `intent/` — Parses user text into structured `ParsedIntent`. Regex patterns first (`patterns.ts`), AI fallback via pi-ai.
-3. `personas/` — Persona resolver. Caches persona `.md` files in `PERSONAS/` directory (named `{personaId}--{personaVersionId}.md`). Downloads from API on cache miss. Each message carries `personaId`/`personaVersionId`; the worker resolves and recreates the agent when persona changes.
+3. `personas/` — Persona resolver. Caches persona `.json` files in `PERSONAS/` directory (named `{personaId}--{personaVersionId}.json`). Downloads from API on cache miss. Returns a `ResolvedPersona` object with `systemPrompt`, `type` (`'chat'` | `'project'`), and optional `project` data (`PersonaProject`). Each message carries `personaId`/`personaVersionId`; the worker resolves and recreates the agent when persona changes. Project personas include linked project info (name, description, projectFolder, repoUrl) which the worker uses to set the working directory and build a project-aware system prompt.
 4. `agent-tools/` — Tool registry for pi-agent-core agents. Core tools (file, bash, search, git, notify) and CLI agent tools (claude_code, gemini_cli, codex_cli, browser). `loadTools(toolSet, ctx)` dispatches by set name.
 5. `auto-answer/` — Three-tier system for automatically answering questions: (1) obvious pattern matching, (2) RULES.md rule lookup, (3) AI judgment.
 
