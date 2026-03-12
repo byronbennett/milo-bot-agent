@@ -507,6 +507,7 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
             projectPath = fullPath;
             projectChanged = true;
             currentPersonaProject = resolved.project;
+            updateSessionLogPath(fullPath);
             log(`Project persona: set projectPath=${fullPath}`);
             send({
               type: 'WORKER_PROJECT_SET',
