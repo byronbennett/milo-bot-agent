@@ -41,6 +41,7 @@ import {
 import { sendNotification } from '../utils/notify.js';
 import {
   initSessionLog,
+  updateSessionLogPath,
   logUserMessage,
   logAIResponse,
   logAIError,
@@ -223,7 +224,31 @@ async function resolvePersonaIfNeeded(
       apiKey,
     });
     personaInstructions = resolved.systemPrompt;
-    log(`Persona resolved: ${personaId}@${personaVersionId}`);
+    log(`Persona resolved: ${personaId}@${personaVersionId} (type=${resolved.type})`);
+
+    // For project personas, resolve the project path
+    if (resolved.type === 'project' && resolved.project?.projectFolder) {
+      const { existsSync } = await import('fs');
+      const { join, isAbsolute } = await import('path');
+
+      const folder = resolved.project.projectFolder;
+      const fullPath = isAbsolute(folder) ? folder : join(workspaceDir, 'PROJECTS', folder);
+
+      if (existsSync(fullPath)) {
+        projectPath = fullPath;
+        updateSessionLogPath(fullPath);
+        log(`Project persona: set projectPath=${fullPath}`);
+        send({
+          type: 'WORKER_PROJECT_SET',
+          sessionId,
+          projectName: resolved.project.name,
+          projectPath: fullPath,
+          isNew: false,
+        });
+      } else {
+        log(`WARNING: Persona project folder does not exist: ${fullPath} — using current projectPath`);
+      }
+    }
   } else {
     personaInstructions = null;
   }
@@ -511,6 +536,11 @@ async function main(): Promise<void> {
           error: 'Memory compaction is not supported for Codex sessions. Use "clear memory" to start a fresh thread.',
           fatal: false,
         });
+        break;
+      case 'WORKER_UPDATE_PROJECTS':
+        projectPath = msg.primaryProjectPath;
+        updateSessionLogPath(msg.primaryProjectPath);
+        log(`Projects updated: primary=${msg.primaryProjectPath}`);
         break;
       case 'WORKER_CLOSE':
         logSessionClose();
