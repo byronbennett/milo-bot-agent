@@ -77,6 +77,7 @@ const pendingForms = new Map<string, { resolve: (response: FormResponse) => void
 let currentPersonaId: string | undefined;
 let currentPersonaVersionId: string | undefined;
 let currentModel: string | undefined;
+let currentPersonaProject: import('../personas/resolver.js').PersonaProject | null = null;
 
 // Config from WORKER_INIT
 let apiUrl = '';
@@ -150,7 +151,7 @@ function getContextSize(): ContextSize {
 /**
  * Create or recreate the pi-agent-core Agent with the given system prompt and model.
  */
-async function createAgent(systemPromptText: string | null, modelId: string | null): Promise<void> {
+async function createAgent(systemPromptText: string | null, modelId: string | null, personaProject?: import('../personas/resolver.js').PersonaProject | null): Promise<void> {
   const { Agent } = await import('@mariozechner/pi-agent-core');
   const { getModel } = await import('@mariozechner/pi-ai');
   const { loadTools } = await import('../agent-tools/index.js');
@@ -163,6 +164,21 @@ async function createAgent(systemPromptText: string | null, modelId: string | nu
   sections.push(systemPromptText ?? DEFAULT_SYSTEM_PROMPT);
 
   sections.push(`## Current Session\n- Working directory: ${projectPath}\n- Session: ${sessionName}`);
+
+  // Add project assignment context for project personas
+  if (personaProject) {
+    const lines = [
+      `## Project Assignment`,
+      `- Project: ${personaProject.name}`,
+      `- Path: ${projectPath}`,
+    ];
+    if (personaProject.description) {
+      lines.push(`- Description: ${personaProject.description}`);
+    }
+    lines.push('');
+    lines.push('You are assigned to this project. All file operations and code changes should be within this project directory unless explicitly told otherwise.');
+    sections.push(lines.join('\n'));
+  }
 
   sections.push(`## Your Capabilities
 You have tools for file operations, shell commands, git, and code search.
@@ -463,24 +479,51 @@ async function handleTask(msg: WorkerTaskMessage): Promise<void> {
     log(`  current: personaId=${currentPersonaId ?? 'undefined'} personaVersionId=${currentPersonaVersionId ?? 'undefined'} model=${currentModel ?? 'undefined'}`);
 
     if (needsRecreate) {
-      // Resolve persona system prompt
+      // Resolve persona
       let systemPromptText: string | null = null;
+      currentPersonaProject = null;
 
       if (msg.personaId && msg.personaVersionId) {
         const { resolvePersona } = await import('../personas/resolver.js');
-        systemPromptText = await resolvePersona({
+        const resolved = await resolvePersona({
           personasDir,
           personaId: msg.personaId,
           personaVersionId: msg.personaVersionId,
           apiUrl,
           apiKey,
         });
-        log(`Persona resolved: ${msg.personaId}@${msg.personaVersionId}`);
+        systemPromptText = resolved.systemPrompt;
+        log(`Persona resolved: ${msg.personaId}@${msg.personaVersionId} (type=${resolved.type})`);
+
+        // For project personas, resolve the project path
+        if (resolved.type === 'project' && resolved.project?.projectFolder) {
+          const { existsSync } = await import('fs');
+          const { join, isAbsolute } = await import('path');
+
+          const folder = resolved.project.projectFolder;
+          const fullPath = isAbsolute(folder) ? folder : join(workspaceDir, 'PROJECTS', folder);
+
+          if (existsSync(fullPath)) {
+            projectPath = fullPath;
+            projectChanged = true;
+            currentPersonaProject = resolved.project;
+            log(`Project persona: set projectPath=${fullPath}`);
+            send({
+              type: 'WORKER_PROJECT_SET',
+              sessionId,
+              projectName: resolved.project.name,
+              projectPath: fullPath,
+              isNew: false,
+            });
+          } else {
+            log(`WARNING: Persona project folder does not exist: ${fullPath} — using current projectPath`);
+          }
+        }
       }
 
       const resolvedModel = msg.model ?? initConfig.agentModel ?? 'claude-sonnet-4-6-20250514';
       log(`Creating agent with model=${resolvedModel} provider=${initConfig.agentProvider ?? 'anthropic'}`);
-      await createAgent(systemPromptText, resolvedModel);
+      await createAgent(systemPromptText, resolvedModel, currentPersonaProject);
 
       // Update tracking
       currentPersonaId = msg.personaId;

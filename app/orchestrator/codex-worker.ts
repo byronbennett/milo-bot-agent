@@ -215,13 +215,14 @@ async function resolvePersonaIfNeeded(
 
   if (personaId && personaVersionId) {
     const { resolvePersona } = await import('../personas/resolver.js');
-    personaInstructions = await resolvePersona({
+    const resolved = await resolvePersona({
       personasDir,
       personaId,
       personaVersionId,
       apiUrl,
       apiKey,
     });
+    personaInstructions = resolved.systemPrompt;
     log(`Persona resolved: ${personaId}@${personaVersionId}`);
   } else {
     personaInstructions = null;
