@@ -26,7 +26,7 @@
     "@mariozechner/pi-ai": "0.53.0",
     "@sinclair/typebox": "0.34.48",
     "adm-zip": "^0.5.16",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.8.0",
     "commander": "^12.1.0",
     "node-cron": "^3.0.3",
     "open": "^9.1.0",
@@ -34,18 +34,18 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.7",
+    "@types/adm-zip": "^0.5.8",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.19.11",
+    "@types/node": "^22.19.15",
     "@types/node-cron": "^3.0.11",
-    "eslint": "^9.39.2",
-    "jest": "^30.2.0",
+    "eslint": "^9.39.4",
+    "jest": "^30.3.0",
     "ts-jest": "^29.4.6",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.0"
+    "typescript-eslint": "^8.57.1"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -56,7 +56,8 @@
   ],
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3"
+      "better-sqlite3",
+      "esbuild"
     ]
   },
   "packageManager": "pnpm@10.30.2+sha512.36cdc707e7b7940a988c9c1ecf88d084f8514b5c3f085f53a2e244c2921d3b2545bc20dd4ebe1fc245feec463bb298aecea7a63ed1f7680b877dc6379d8d0cb4"
